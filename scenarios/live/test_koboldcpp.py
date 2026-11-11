@@ -1,17 +1,23 @@
 """KoboldCpp smokes — one small model per process;
 scripts/live-providers.sh launches it. Marked `live`; they skip
 themselves when nothing listens on the default port.
+The dictation smoke writes down a sentence spoken by this machine's
+voice with OTAKU_LIVE_KOBOLDCPP_DICTATION_MODEL, default its model,
+through Whisper (the script loads one beside it) or else the model itself
+where it takes audio; it skips where no dictation model is offered.
 """
 
+import os
 from pathlib import Path
 
 import pytest
 
 from otaku.settings.providers import ProviderConfig
-from scenarios.support.live import first_model
+from scenarios.support.live import assert_written_down, dictation_model, first_model, spoken_wav
 from scenarios.support.live import live_app as build_app
 
 URL = "http://127.0.0.1:5001/v1"
+DICTATION_MODEL = os.environ.get("OTAKU_LIVE_KOBOLDCPP_DICTATION_MODEL", "")
 
 pytestmark = pytest.mark.live
 
@@ -28,6 +34,10 @@ class TestKoboldCpp:
         provider = next(r for r in rows if r.id == "koboldcpp")
         row = next(m for m in provider.models if m.name == live_app.api.app.get().model.name)
         assert row.context_loaded  # the /api/extra window rode the listing
+
+    def test_a_recording_is_written_down(self, live_app, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+        model = dictation_model(live_app, "koboldcpp", DICTATION_MODEL)
+        assert_written_down(live_app, "koboldcpp", model, spoken_wav(tmp_path))
 
 
 @pytest.fixture

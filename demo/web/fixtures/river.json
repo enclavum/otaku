@@ -930,7 +930,9 @@
      "file": "crd-0001-20260101-8aeeff74.jpg",
      "width": 768,
      "height": 1024,
-     "size": 133429
+     "size": 133429,
+     "kind": "portrait",
+     "name": ""
     },
     "portrait_sent": null,
     "provider": null,
@@ -954,7 +956,9 @@
      "file": "crd-0002-20260101-3c1e7abb.jpg",
      "width": 768,
      "height": 1024,
-     "size": 125673
+     "size": 125673,
+     "kind": "portrait",
+     "name": ""
     },
     "portrait_sent": null,
     "provider": null,

@@ -10,7 +10,7 @@ regenerate is a `set_head` + `append` that diverges into a sibling.
 their journals, and the cast, ids remapped, each character's codex link
 kept — so every story is fully self-contained. A picture is the one
 thing not copied: the message names it and the files folder holds it
-once (`schema.Attachment`), so a fork shares it by reference, and
+once (`store.pictures.Attachment`), so a fork shares it by reference, and
 `Store.sweep_files` clears the folder after a delete.
 """
 
@@ -26,7 +26,9 @@ from datetime import datetime
 from typing import Any
 
 from otaku.store.database import Database
-from otaku.store.schema import Attachment, Message, Story, StoryMode, StorySettingDB
+from otaku.store.pictures import Attachment
+from otaku.store.schema import Message, Story
+from otaku.store.story import StoryMode, StorySettingDB
 
 # The numbered suffix a fork's title carries — every one it has collected,
 # so numbering works off the stem and the suffixes can never pile up
@@ -186,7 +188,7 @@ class StoryOps:
 
     def get_settings(self, story_id: int) -> tuple[StorySettingDB, ...]:
         """Every setting the story has stored, as the column records them
-        (`schema.StorySettingDB`); none for a story that stored none. Which
+        (`store.story.StorySettingDB`); none for a story that stored none. Which
         settings there ARE, and their defaults, is the caller's business."""
         row = self._db.conn.execute(
             "SELECT settings FROM stories WHERE id = ?", (story_id,)

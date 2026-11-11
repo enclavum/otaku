@@ -684,10 +684,10 @@ def _patch_threads() -> None:
     )
 
 
-# ---------- the state dir ----------
+# ---------- the home folder ----------
 
 
-def _seed_state_dir(root: Path) -> None:
+def _seed_home_folder(root: Path) -> None:
     """What scenarios/support/harness.py seeds, minus the HTTP server:
     one scripted provider, smoothing off (the pacing is the script's),
     idle extraction off (a browser tab has no worker thread to run it —
@@ -741,7 +741,7 @@ def main() -> None:
     import otaku.terminal.dispatch.context as dispatch_context
     import otaku.terminal.tty as tty_mod
     from otaku.backend import launch as backend_launch
-    from otaku.backend.api import Api, ModelRef
+    from otaku.backend.api import Api, ModelRef, ModelRole
     from otaku.providers import registry as providers_registry
     from otaku.terminal import run as terminal_run
 
@@ -784,8 +784,8 @@ def main() -> None:
     )
 
     root = Path("/state/otaku")
-    _seed_state_dir(root)
-    # The visitor's "own" file, outside the state dir: the card /card
+    _seed_home_folder(root)
+    # The visitor's "own" file, outside the home folder: the card /card
     # imports — a real file the real parser reads.
     import demo_script
 
@@ -795,7 +795,7 @@ def main() -> None:
     app = backend_launch.open_app(root)
     api = Api(app)
     if api.app.get().model is None:
-        api.app.update(model=ModelRef(PROVIDER, MODEL))
+        api.app.update(models={ModelRole.WRITING: ModelRef(PROVIDER, MODEL)})
 
     term_input, term_output = _build_ptk_io()
     try:

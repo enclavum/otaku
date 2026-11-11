@@ -13,7 +13,8 @@ from otaku.context.prompt import JoinType
 from otaku.formatting import format_context
 from otaku.providers import Stats
 from otaku.store import schema
-from otaku.store.schema import Attachment, StoryMode
+from otaku.store.pictures import Attachment
+from otaku.store.story import StoryMode
 
 
 def as_events(found: Generator[domain_messages.Event, None, None]) -> Iterator[PlayEvent]:

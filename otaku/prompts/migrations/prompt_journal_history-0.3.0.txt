@@ -1,0 +1,16 @@
+Write {name}'s history: everything they know of the story so far, drawn from
+their own journal entries below.
+
+Rules:
+- Chronological prose, past tense, about 300 words. No headings, no bullets.
+- Compress the earliest entries hardest and keep the recent ones specific.
+  Names, promises, debts, injuries, betrayals, and secrets survive compression;
+  weather and scenery do not.
+- Only what {name} witnessed or was told. Add nothing that is not below.
+- Write in the SAME LANGUAGE as the entries below — do not translate them, and
+  do not answer in English because these instructions are in English.
+- Output the history only.
+
+{name}'s journal, oldest entry first:
+{entries}
+

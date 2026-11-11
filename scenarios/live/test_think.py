@@ -1,7 +1,7 @@
 """Thinking through every provider, live: `/set think none` plays a turn
 with no thinking echo, a level plays or is refused as the provider allows,
 and the request that left carries exactly the knobs the provider is
-promised — read back from the state dir's own request log, the one
+promised — read back from the home folder's own request log, the one
 record of what left the machine. Marked `live`; each case skips itself
 when its server is down or its key is not set, as the generic smokes do.
 
@@ -173,7 +173,7 @@ def _expected(knobs: frozenset[str], level: str) -> dict[str, object]:
 
 def _carried(app, provider: str) -> dict[str, object]:  # type: ignore[no-untyped-def]
     """The thinking fields on the LAST turn request that left for
-    `provider`, from the state dir's request log. A 400 on the knob makes
+    `provider`, from the home folder's request log. A 400 on the knob makes
     otaku send the turn again without it, so the turn's FIRST request is
     the one read: the knobs are what left, whatever the provider said."""
     bodies = []

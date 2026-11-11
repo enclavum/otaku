@@ -5,8 +5,8 @@ Every colour and every typeface the interface uses is a custom property on
 does not list — title cuts, the tabs, tracking, one-off lengths — is the
 design's own, hard-coded on purpose, and no theme's business.
 
-**A theme is a list of token overrides and nothing else.** Put them in the
-state dir's `web/custom.css`, which loads last and wins. Override
+**A theme is a list of token overrides and nothing else.** Put them in
+`web/custom.css` in otaku's home folder, which loads last and wins. Override
 `--otk-paper` and the page, every panel, every docket, every dialog and every
 field change together — there is no second place where paper is defined.
 
@@ -57,6 +57,7 @@ stylesheet that reaches past the contract accepts the breakage itself.
 | `--otk-danger` | delete, stop, refusals and failures — nothing else |
 | `--otk-danger-tint` | the ground of a window's foot holding an error |
 | `--otk-danger-flash` | the one flash of that ground as the error arrives |
+| `--otk-transcribe` | the dictation level's bars while speech is being transcribed |
 | `--otk-chat-story` | the rule on the story's side in the chat layout |
 | `--otk-chat-you` | the rule on the reader's side in the chat layout |
 
@@ -82,7 +83,7 @@ the summary in a grey fold.
 ## Typefaces of your own
 
 Put a `.woff2` (or `.woff`, `.ttf`, `.otf`) in `web/fonts/` beside your
-`custom.css` in the state dir, and ask for it under `/web-fonts/`:
+`custom.css` in otaku's home folder, and ask for it under `/web-fonts/`:
 
 ```css
 @font-face {
@@ -199,7 +200,7 @@ so a list of mixed scripts does not ripple. Raise both together.
 | `--otk-field-pad` | fields and filters |
 | `--otk-panel-pad` | the gutter of every panel |
 | `--otk-page-pad` | the page's own margin |
-| `--otk-dialog-pad` | every dialog |
+| `--otk-dialog-pad` | every dialog; one that ends in its foot keeps 14px under it, as a docket does |
 | `--otk-col-lamp` | the resident / answering lamp gutter |
 | `--otk-col-size` | a model's size column |
 | `--otk-col-count` | a count column |
@@ -272,11 +273,14 @@ in classes, so a stylesheet can name it the same way the scripts do.
 |---|---|---|
 | `aria-selected="true"` | `.otk-row`, `.otk-tab`, `.otk-index__item`, `.otk-prefix`, `.otk-jstory` | the current one; on a card, the story whose journals are shown |
 | `aria-checked="true"` / `"false"` | `.otk-choice`, `.otk-switch`, `.otk-toggle`, `.otk-tick` | the one in force; a switch on or off; a card picked for a story |
-| `aria-pressed="true"` | `.otk-mode`, `.otk-ruler__cell`, `.otk-seg__btn` | the layout in force; the depth a tool's text goes in at; how All characters shows its cards |
-| `aria-disabled="true"` | `.otk-btn`, `.otk-mode`, `.otk-lightbox__arrow` | out of reach for now |
+| `aria-pressed="true"` | `.otk-mode`, `.otk-ruler__cell`, `.otk-seg__btn` | the layout in force; the depth a tool's text goes in at; how Characters shows its cards |
+| `aria-disabled="true"` | `.otk-btn`, `.otk-mode`, `.otk-lightbox__arrow`, `.otk-pick__row` | out of reach for now; in Add a character, a card the story has already ("already in"), or one with no text yet ("empty card") |
+| `data-nopic` | `.otk-pick__preview` | Add a character: the card picked has no picture, its portrait's frame left empty |
+| `inert` | the composer's box, its verbs but the microphone, `.otk-attach`, `.otk-prefixes`, `[data-prefixes]` | out of reach while dictation listens; the box and the verbs read as disabled |
 | `aria-current="true"` | `.otk-spine__dot`, `.otk-pics__thumb` | the lit one of the spine's dots; the picture of a card shown large |
 | `hidden` | any pane or menu | not mounted |
 | `hidden` | `.otk-revert` | Revert is not offered: shown after an Undo or a Regen while there is something to take back, never while a reply is arriving; once shown it waits `--otk-revert-hold`, fades over `--otk-revert-fade`, and the app sets `hidden` on `animationend` — hover or focus holds it |
+| `hidden` | `.otk-mic-btn` | the microphone is not offered: no model is saved for dictation |
 | `data-discarded="shown"` / `"hidden"` | `.otk-col--messages` | the list also shows the discarded turns — undone, or replaced by a regen — as `.otk-row--discarded` rows, faint and unnumbered, after the turn they leave from |
 | `data-open="true"` | `.otk-call` | the notes, a tool turn or a reply's thinking shows its text under its label; its toggle (`.otk-call__toggle`) reads "hide" and carries `aria-expanded="true"` |
 | `data-popup="/model"` | a `<dialog>` | which command opens it |
@@ -285,11 +289,21 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `data-transcript="canvas"` / `"manuscript"` / `"chat"` | `.otk-transcript` | which of the three layouts the same turns are read in |
 | `data-completion="chat"` / `"text"` | `.otk-app` | the wire the next request goes over; over the text wire the flow shows no picture tiles |
 | `data-layout="canvas"` / `"manuscript"` / `"chat"` | `.otk-app` | the look the open story is drawn in; on the canvas the story is typed in at its end, the composer standing below |
+| `data-dictating="true"` | `.otk-composer` | listening: `.otk-dictation` — a level of nine bars, a band of the voice's pitch each, low to high, scaled about its middle by how loud its band is, and the elapsed time — stands at the end of the writing line, which keeps what was typed; the microphone (`.otk-mic-btn`) is `.is-recording`, and the rest of the composer `inert` |
+| `data-dictating="transcribing"` | `.otk-composer` | after listening stops, until the text arrives: in the same place the level's nine bars turn `--otk-transcribe` grey, flat, with a single peak travelling across them left to right (`@keyframes otk-scan`), the recording's length beside them; then the attribute goes and the text is added after what was typed |
+| `data-busy` | `.otk-gen` | a card's text is being written from its pictures: Generate card from picture reads Cancel at the same width (`.otk-swap`, its `__idle` and `__busy` captions), the run's time (`.otk-gen__elapsed`) stands where the versions do, and a segment sweeps along the bar's rule (`otk-sweep`) |
 | `data-playing` | `.otk-app` | a reply is arriving; the layout glyphs are inert meanwhile |
 | `data-open="true"` | `.otk-rail` | the contents, on a narrow window |
-| `data-view="list"` / `"small"` / `"mid"` / `"large"` | `.otk-chars` | All characters as rows, or as pictures at one of three tile sizes |
+| `data-view="list"` / `"small"` / `"mid"` / `"large"` | `.otk-chars` | Characters as rows, or as pictures at one of three tile sizes |
 | `data-unlinked="open"` / `"closed"` | `.otk-chars` | the stories' unlinked characters beside the cards, or folded to a strip |
 | `data-editing` | `.otk-edit` | the field editor is open |
+| `data-lang` on `.otk-split`; `aria-checked` on `.otk-langs__opt`; `data-up` on `.otk-langs` | a card's generation bar | the language a card is generated in, its code beside Generate card from picture; the arrow (`.otk-split__menu`, `aria-expanded`) opens the menu of languages, the one in force ticked, the browser's own at the top where it is none of the menu's; `data-up` where the menu opens upward, the column having no room below |
+| `data-format` on `.otk-split--export`; `aria-checked` on `.otk-langs__opt`; `data-up` on `.otk-langs` | a card window's foot | the format a card is exported in, its code beside Export; the arrow (`.otk-split__menu`, `aria-expanded`) opens the formats, the one in force ticked; `data-up` where the menu opens upward |
+| `data-state="reading"` / `"ready"` / `"similar"` / `"duplicate"` / `"refused"` / `"added"` | `.otk-imp__row` | Import cards: a file or link being read; ready to add; similar to a card Characters has, skipped until brought back, then added beside it (why, in the state's tooltip); already in Characters, skipped; refused, the reason in its state; added, after Import — Import (`[data-import]`) carries `aria-disabled="true"` while no row is ready or similar |
+| `data-skipped` | `.otk-imp__row` | Import cards: a row the reader skipped, faint, its cross (`.otk-imp__remove`) turned a plus that brings it back; not imported |
+| `contenteditable="true"` | `.otk-imp__name` | Import cards: a row's name open for typing, its pen (`.otk-imp__rename`) after it; Enter or leaving it keeps the name, Esc puts it back |
+| `aria-expanded="true"` | `.otk-sites__toggle` | a link field's supported sites open: the list (`.otk-sites`, a popover over the dialog, `:popover-open`) under the toggle, one `.otk-sites__row` per site before its note — its name (`.otk-sites__name`) and its hosts (`.otk-sites__domain`); a second press, a click outside it, Esc, a scroll or a resize closes it |
+| `data-level="1"` … `"6"` | `.otk-md__heading` | a card's field read as Markdown (`.otk-md`): a heading, by its number of `#` |
 | `data-framing` / `data-framed` | `.otk-edit` / a turn in the canvas | a paragraph of several rows is open as one field: the editor holding it, and the rows standing aside for it |
 | `data-join="inline"` / `"paragraph"` | a turn in the transcript; `.otk-tail` | how it joins the turn before it: as it stands, or after a blank line — what the canvas layout draws by; on the typing place, `"paragraph"` alone, where the line typed will open one |
 | `data-blank` | `.otk-tail` | the canvas's typing place holds nothing yet, so it shows the caret where the line goes |
@@ -299,7 +313,9 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `data-pinned="true"` / `"false"` | `.otk-row__id` in the messages list, `.otk-detail__pin` in its reader | the message is pinned: its number shows as a filled pin, as does the reader's pin; absent on a row that may not be pinned |
 | `.is-offline` | `.otk-app` | the server stopped answering |
 | `.is-loaded` / `.is-dim` | `.otk-row` | a model resident in memory, or not |
-| `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over the drop zone, and one dropped |
+| `.is-recording` | `.otk-mic-btn` | listening, until the next click, Enter or Esc; its capsule (`.otk-mic-btn__capsule`) filled in |
+| `.is-resting` | `.otk-mic-btn` | just stopped: it keeps its ink under the pointer or the focus that stopped it, until either leaves |
+| `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over a drop zone, and one dropped; Import cards' zone takes `.is-dragover` alone, its files being rows of its list |
 | `.is-dragover` | `.otk-tile`, `.otk-charrow`, `.otk-pics` | a story character over a card or over new card, a card file over new card; pictures over a card's |
 | `.is-dragging` | `.otk-pics__thumb`, `.otk-tile`, `.otk-charrow` | a card's picture, or a card, being moved to another place |
 | `.is-out` | `.otk-editable` | a value outside its bounds, while typed |

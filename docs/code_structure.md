@@ -5,25 +5,26 @@ What a module owns is its docstring's; this is the map the docstrings hang on.
 
 ## The layers
 
-Each package imports only the packages after its arrow, besides the standard library and the
-declared dependencies:
+Each package imports only the packages after its arrow, besides the standard library, the declared
+dependencies, and the two leaves every package may import, which the table leaves out: `envvars`
+(the names of the environment variables otaku reads) and `formatting`:
 
-    cli          → terminal, web, backend.launch, logging, update, formatting
-    terminal     → console, backend.api, web, formatting
-    web          → console, backend.api, formatting
-    console      → formatting
-    agents       → context, providers, store, logging, formatting
-    backend      → agents, context, providers, integrations, store, settings, encryption,
-                   logging, formatting
+    cli          → terminal, web, backend.launch, logging, update
+    terminal     → console, backend.api, web
+    web          → console, backend.api
+    console      → -
+    backend      → agents, context, providers, integrations, store, settings, prompts,
+                   encryption, logging, update
+    agents       → context, providers, store, logging
     context      → store (reads only), providers
-    providers    → settings, formatting
-    integrations → settings, formatting
+    providers    → settings
+    integrations → settings
     store        → encryption
-    settings     → formatting
-    logging      → providers, encryption, formatting
-    encryption   → formatting
-    update       → (nothing)
-    formatting   → (nothing)
+    prompts      → settings
+    settings     → -
+    logging      → providers, encryption
+    encryption   → -
+    update       → -
 
 The calls point the same way as the imports: nothing imports upward, and every arrow is exercised by
 a call in its own direction. A frontend reaches the backend through `backend.api` and nothing else;
@@ -37,7 +38,7 @@ serve the app it holds beside the chat (`/set serve`); the web knows nothing of 
       base.py     what every resource and schema is built on, and what a write takes and answers
       errors.py   the refusals, raised below and caught above
       formats/    the story document and the foreign formats: every wild file otaku reads
-      launch.py   one state dir opened as the app
+      launch.py   one home folder opened as the app
       samples/    the sample stories, their pictures and cards, seeded at a first launch
       app/  codex/  story/    the groups of resource folders
 
@@ -102,7 +103,7 @@ A module that serves more than one place, and no frontend, is its layer's machin
 its place says so — a module in a group beside the resource folders; in the web's door and the
 page's client, where every other module is named after a resource, the underscore in its name does:
 
-    backend.app.paths               what one state dir holds
+    backend.app.paths               what one home folder holds
     backend.app.passwords           the web password's hash
     backend.app.runs                a forced extraction pass, as it runs
     backend.app.thread              the app's own thread: every call queued onto it, in two lanes
@@ -180,7 +181,7 @@ A function behind one operation takes the operation's verb and its noun: `get_st
 verb: `fork_story`, `undo_exchange`, `regenerate_reply`, `submit_line`, `switch_model`. A field
 written alone is `set_<field>`.
 
-The `App` (`app.core.services`) is what one opened state dir is made of. Its underscore members are
+The `App` (`app.core.services`) is what one opened home folder is made of. Its underscore members are
 the services': they use them, the launch composes them — the samples' seeding with it — and nothing
 above the services touches them.
 
@@ -218,7 +219,8 @@ machinery. The rest of the page reaches the server through the facade and nothin
     terminal/
       api/         the door
       commands.py  the table: every slash word, the shortcut keys, what makes a line a command
-      tty/         the medium itself: escapes, theme, typesetter, rendering, row math
+      tty/         the medium itself: escapes, theme, typesetter, rendering, row math, the
+                   microphone
       prompt/      one submission in
       chat/        the conversation as the terminal holds and draws it
       screens/     the full-screen surfaces
@@ -260,7 +262,7 @@ that knows both at work, and `run` the one that starts it.
       js/api/          the client, the page's door to `web.api`
       js/kit/          what every part is built from: elements, spellings, the status line, the
                        browser with its editors and dialogs, a paragraph typeset, a message's
-                       pictures
+                       pictures, the microphone
       js/play/         the story as the page plays it: the story it holds, the language, the frame
                        around the transcript, the transcript
       js/screens/      what opens over the page: the story browser, the dossier and its Tools tab,
@@ -268,11 +270,12 @@ that knows both at work, and `run` the one that starts it.
                        the reports, the transfers, help and support, the sign-in
       js/commands.js   what a row of the contents opens, and the doors the play goes through
       js/composer.js   one line in
+      js/dictation.js  what is said, written down into that line
 
-Imports point one way: `api` ← `kit` ← `play` ← `screens` ← {`commands`, `composer`} ← `app.js`.
-The composer stands above the screens because a line it sends goes through `commands`, whose table
-opens every screen. A module goes in the group of its role, and imports only what its row in the
-architecture test allows.
+Imports point one way: `api` ← `kit` ← `play` ← `screens` ← {`commands`, `composer`} ← `dictation` ←
+`app.js`. The composer stands above the screens because a line it sends goes through `commands`,
+whose table opens every screen; dictation stands above the composer, whose line it writes into. A
+module goes in the group of its role, and imports only what its row in the architecture test allows.
 
 ## The two frontends
 
@@ -289,14 +292,15 @@ a part's twin is found in the other frontend under the same role:
     js/commands.js    commands.py, dispatch/   what a reader's act does
     app.js            run.py                   the frontend's life
 
-Where the job is the same, the two modules are twins under one name: the story browser
-(`stories`), the dossier (`dossier`) and its Tools tab (`tools`), the model picker (`models`), help
-(`help`), the commands (`commands`). Where the medium shapes the job, each frontend names it in its
-own words and the role is the twin: the page's `prose.js` is the terminal's `typography.py`,
-`status.js` its `statusline.py`, `held.js` its `Chat`, `shell.js` its `landing.py`, and
-`transcript.js` its `stream.py` and `ledger.py` with `render.py` beside them. A part the other
-frontend has no use for stays its frontend's own: the page's sign-in, the terminal's simulation of
-where printed text leaves the cursor.
+Where the job is the same, the two modules are twins under one name: the story browser (`stories`),
+the dossier (`dossier`) and its Tools tab (`tools`), the model picker (`models`), help (`help`), the
+commands (`commands`), dictation (`dictation`: the page's `js/dictation.js`, the terminal's
+`prompt/dictation.py`) and the microphone (`microphone`, in each one's kit). Where the medium shapes
+the job, each frontend names it in its own words and the role is the twin: the page's `prose.js` is
+the terminal's `typography.py`, `status.js` its `statusline.py`, `held.js` its `Chat`, `shell.js`
+its `landing.py`, and `transcript.js` its `stream.py` and `ledger.py` with `render.py` beside them.
+A part the other frontend has no use for stays its frontend's own: the page's sign-in, the
+terminal's simulation of where printed text leaves the cursor.
 
 What corresponds is the role, never the drawing: what a part means matches across the two, and how
 it looks is each medium's own. A rule one frontend copies from the other names its twin's home in a
@@ -363,8 +367,9 @@ typed argument means and makes the `api.stories.update` call itself.
 The store is laid out by table, not by resource: one `*Ops` class per table, held by `Store` under
 the table's name (`store.stories`, `store.messages`, …), the tables of a kind in one module —
 `ops.codex` (cards), `ops.stories` (stories, messages), `ops.lore` (scenes, characters, journals),
-`ops.records` (usage, history, settings) — and on `Store` itself the one operation that spans the
-tables and the files folder, `sweep_files`. Only the domain touches it, through `app._store`.
+`ops.records` (usage, history, settings) — and on `Store` itself the operations that span the
+tables and the files folder: `sweep_files`, and `cleanup`, the launch's sweep and vacuum. Only the
+domain touches it, through `app._store`.
 
 ## Protected names
 

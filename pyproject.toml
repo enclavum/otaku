@@ -49,6 +49,7 @@ dependencies = [
     "pillow>=12.3,<13.0",
     "pillow-heif>=1.7,<2.0",
     "prompt_toolkit>=3.0.53,<4.0",
+    "sounddevice>=0.5.6,<0.6",
 ]
 
 [project.urls]
@@ -108,8 +109,9 @@ python_version = "3.11"  # type-check against the floor, not the interpreter in 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "live: talks to a real provider (each smoke skips itself when its server or api key is absent)",
+    "live: talks to a real provider or service (each smoke skips itself when its server or api key is absent)",
     "cli: drives the real binary in a subprocess or a pty — the slow end of the suite",
-    "slow: minutes, not seconds — a run that should skip them says `-m \"not slow\"` (`make regression` runs them alone)",
+    "slow: minutes, not seconds — a run that should skip them says `-m \"not slow\"` (`make regressions` runs them alone)",
+    "integration: an integration against the real service it asks (scenarios/integrations) — `live` too, so every offline run leaves it out; `make integrations` runs them alone",
 ]
 addopts = "-q"

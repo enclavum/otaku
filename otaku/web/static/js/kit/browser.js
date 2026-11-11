@@ -27,6 +27,19 @@ export function closeAll() {
   for (const dialog of $$("dialog[open]")) dialog.close();
 }
 
+/** What the reader's putting `dialog` down asks first — Esc, its scrim,
+    its Close (`putDown`): `asking` answers, the reader asked or not,
+    whether it may close. A close the page makes itself asks nothing. */
+export function asksBeforeClosing(dialog, asking) {
+  dialog._asking = asking;
+}
+
+/** `dialog` put down by the reader, where what it asks first lets it. */
+export async function putDown(dialog) {
+  if (dialog._asking && !(await dialog._asking())) return;
+  dialog.close();
+}
+
 export function footnote(popup, text, refused = false) {
   /* The footer's fact slot: the panel's standing fact, and what a WRITE
      answered with — carried into the redraw the write triggers, or the
@@ -575,7 +588,9 @@ export function edited(
   const cancel = verb("cancel", "cancel");
 
   /* The reading half. An empty value says what is absent in words, the
-     way every other unset value does, rather than collapsing the box. */
+     way every other unset value does, rather than collapsing the box: the
+     field's `_absent`, where the words are the reading's alone and the
+     opened field stands empty, else its placeholder. */
   let shown = field;
   if (field === input) {
     const read = element("p", `${input.className} otk-typeset`);
@@ -583,7 +598,7 @@ export function edited(
     shown.append(read, input);
     shown._repaint = () => {
       const bare = !input.value.trim();
-      read.textContent = bare ? input.placeholder : input.value;
+      read.textContent = bare ? (input._absent ?? input.placeholder) : input.value;
       read.classList.toggle("otk-absent", bare);
     };
   }

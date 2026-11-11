@@ -1,6 +1,7 @@
 ---
 paths:
   - "otaku/settings/**/*"
+  - "otaku/prompts/**/*"
   - "otaku/backend/launch.py"
   - "otaku/backend/app/core/*.py"
   - "otaku/backend/app/paths.py"
@@ -34,21 +35,38 @@ the app's own edits changing file and memory together, a hand edit seen
 at the next launch. A write that cannot land is refused (`Unavailable`)
 and changes nothing; the story to resume is the one best-effort write.
 
-The model in use is one value both frontends read and write
-(`api.app.update(model=…)`), as `last_story` is. Lore extraction asks
-the model played with unless one is PINNED for it, set by either picker
-(the page's "Use for extraction", the terminal's `x`) through
-`api.app.update(extraction_model=…)`. A pinned model the engine no
-longer serves fails the pass and holds the status — never a quiet fall
-back to the play model.
+Every model otaku remembers is PINNED for a role
+(`settings.state.ModelRole`), one key each under state.toml's
+`[models]`, through one write, `api.app.update(models={role: …})`, and
+read back as `/app`'s `models`. The `writing` role is the model in use,
+one value both frontends read and write, as `last_story` is: pinning it
+switches (its saved settings made current, a local engine loading it),
+it is never unpinned — the way off it is another — and `/app.model`
+carries its facts. Lore extraction asks the writing model unless another
+is pinned for it, set by either picker (the page's "Use for extraction",
+the terminal's `x`); one that is the writing model is not saved apart
+(`settings.state.save`), and `/app` carries no flag for it; a pinned
+model the engine no longer serves fails the pass and holds the status —
+never a quiet fall back to the writing model. Dictation has no model until one is pinned (the terminal
+picker's dictation view, `d`; the page's Dictation tab). A role asks a
+kind of model (`providers.ModelKind`): a pin of the wrong kind is
+refused. A new purpose is a new role, never a field of its own.
 
 ## Migrations
 
 Three compatibility frameworks, one per artifact that outlives a
 release — a format change lands inside one of them, never beside them:
 
-- **Settings** (`otaku/settings/migrations`) — convergent, rerun at
-  every launch, self-healing.
+- **Settings** (`otaku/settings/migrations`, prompts.toml's in
+  `otaku/prompts/migrations`) — convergent, rerun at every launch,
+  self-healing. A change to a built-in template
+  (`otaku/prompts/templates/framing_card.txt`) lands with the text it
+  replaces, frozen from the last release tag beside the migrations under
+  the same name, the version appended
+  (`otaku/prompts/migrations/framing_card-0.7.0.txt`): the refresh that
+  carries it to the prompts.toml files still holding the old text is
+  built from that folder, and a template changed without it stays old in
+  every existing file — no test can tell.
 - **Database** (`otaku/store/migrations`) — the versioned ladder, its
   package docstring the whole of it.
 - **Export format** (`otaku/backend/formats`) — the import

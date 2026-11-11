@@ -378,7 +378,7 @@
   }
  ],
  "app": {
-  "version": "0.9.0",
+  "version": "0.10.0",
   "launch_facts": {
    "notices": [],
    "hint": "Sample stories were imported so you can look around — type to play on, /stories switches between them, or see every command with /help · /model chooses a model · /new starts your own play.",
@@ -402,11 +402,17 @@
    "can_complete_text": false,
    "can_attach": false
   },
-  "extraction_model": {
-   "provider": "ollama",
-   "name": "test-model",
-   "listed_name": "test-model",
-   "pinned": false
+  "models": {
+   "writing": {
+    "provider": "ollama",
+    "name": "test-model",
+    "listed_name": "test-model"
+   },
+   "extraction": {
+    "provider": "ollama",
+    "name": "test-model",
+    "listed_name": "test-model"
+   }
   },
   "on_cloud": false
  },
@@ -551,7 +557,10 @@
       "locality": null,
       "text_template": null,
       "reasoning_words": "not supported",
-      "capability_words": "json output"
+      "capability_words": "json output",
+      "kinds": [
+       "completion"
+      ]
      }
     ]
    },
@@ -674,7 +683,10 @@
     "locality": null,
     "text_template": null,
     "reasoning_words": "not supported",
-    "capability_words": "json output"
+    "capability_words": "json output",
+    "kinds": [
+     "completion"
+    ]
    }
   ]
  },
@@ -787,7 +799,7 @@
    {
     "rows": [
      [
-      "State dir",
+      "Home folder",
       "~/.otaku"
      ]
     ],

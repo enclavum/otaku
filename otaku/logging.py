@@ -17,6 +17,7 @@ voice below cli. The view functions at the bottom render the logs for
 """
 
 import base64
+import contextlib
 import json
 import re
 import secrets
@@ -25,7 +26,7 @@ import threading
 import traceback
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 
@@ -38,7 +39,8 @@ __all__ = ["DailyLog", "Entry", "ErrorLog", "RequestLog", "SystemLog"]
 
 class DailyLog:
     """The base every log shares: `<prefix>YYYYMMDD<suffix>` files, which
-    days exist, and the one locked mkdir-append-warn write body."""
+    days exist, the one locked mkdir-append-warn write body, and the
+    pruning to the days kept."""
 
     _prefix: ClassVar[str]
     _suffix: ClassVar[str]
@@ -46,8 +48,11 @@ class DailyLog:
     # so the warning says which of the three could not be written.
     _failure: ClassVar[str]
 
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, *, keep_days: int | None = None) -> None:
         self._dir = directory
+        # `[logs] days`: 0 writes nothing; None — a log only read, or one
+        # written where config.toml could not be read — prunes nothing.
+        self._keep_days = keep_days
         self._lock = threading.Lock()  # appends come from worker and REPL threads
         self._warned = False
 
@@ -63,11 +68,29 @@ class DailyLog:
     def get_path(self, day: str) -> Path:
         return self._dir / f"{self._prefix}{day}{self._suffix}"
 
+    def prune(self) -> int:
+        """Delete the day files older than the days kept, today the first
+        of them — every one at 0; how many went."""
+        if self._keep_days is None:
+            return 0
+        now = datetime.now().astimezone()
+        first_kept = (now - timedelta(days=self._keep_days - 1)).strftime("%Y%m%d")
+        pruned = 0
+        for day, _ in self.get_days():
+            if day < first_kept:
+                with contextlib.suppress(OSError):
+                    self.get_path(day).unlink()
+                    pruned += 1
+        return pruned
+
     def _append(self, text: str) -> Path:
-        """Append `text` to today's file under the lock; warn on stderr
+        """Append `text` to today's file under the lock, unless the log is
+        off; warn on stderr
         once per instance when the write fails, naming which log it was —
         three of these run at once. Returns the day's path."""
         path = self.get_path(datetime.now().astimezone().strftime("%Y%m%d"))
+        if self._keep_days == 0:
+            return path
         try:
             with self._lock:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -135,10 +158,10 @@ class RequestLog(DailyLog):
     _suffix = ".jsonl"
     _failure = "request log failed"
 
-    def __init__(self, directory: Path, cipher: Cipher) -> None:
+    def __init__(self, directory: Path, cipher: Cipher, *, keep_days: int | None = None) -> None:
         """The envelope is plaintext; the body is sealed with `cipher`
         (readable inline JSON under the plain cipher)."""
-        super().__init__(directory)
+        super().__init__(directory, keep_days=keep_days)
         self._cipher = cipher
 
     def record_request(self, provider: str, purpose: str, body: dict[str, object]) -> str:

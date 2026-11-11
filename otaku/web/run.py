@@ -141,7 +141,7 @@ def _serve(
     """Serve the app until interrupted — the composition root
     under `run`, the background worker started here for the same reason
     `chat.run` starts it. `config` is the address in force
-    (`api.settings.web`); `custom_web_dir` is the state dir's own web directory, where
+    (`api.settings.web`); `custom_web_dir` is the home folder's own web directory, where
     the reader's `custom.css` lives and nothing else is ever read from;
     `cert_dir` is where the TLS pair lives, read only when the address
     says https. Closing the app stays the caller's, like every other

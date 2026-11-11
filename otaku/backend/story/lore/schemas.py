@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from otaku.backend.base import Schema
-from otaku.store import schema
+from otaku.store.pictures import CardPicture
 
 
 class Lore(Schema):
@@ -87,7 +87,7 @@ class Character(Schema):
     history_journal_id: int | None
     card_id: int | None
     card_name: str | None
-    card_portrait: schema.Attachment | None
+    card_portrait: CardPicture | None
     portrait_sent: bool | None
     provider: str | None
     model: str | None

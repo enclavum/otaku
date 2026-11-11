@@ -2,7 +2,7 @@
 # activated venv, or point it at any other environment runner).
 RUN ?= uv run
 
-.PHONY: lint format typecheck test scenarios regression test-model share stable
+.PHONY: lint format typecheck tests scenarios regressions integrations mock-model share stable
 
 lint:
 	$(RUN) ruff check otaku/ tests/ scenarios/
@@ -13,26 +13,32 @@ format:
 typecheck:
 	$(RUN) mypy
 
-test:
+tests:
 	$(RUN) pytest
 
-# Every scenario but the `slow` ones, which only this selector leaves out.
+# Every scenario but the `slow` ones, which only this selector leaves out,
+# and the `integration` ones, which ask the real services.
 scenarios:
-	$(RUN) pytest scenarios/ -m "not slow"
+	$(RUN) pytest scenarios/ -m "not slow and not integration"
 
 # The terminal's screen played turn by turn against its own echo
 # (scenarios/cli/test_screen.py): minutes, so left out of `scenarios`.
-regression:
+regressions:
 	$(RUN) pytest scenarios/ -m slow
 
-# A fake llama.cpp on llama.cpp's own port, for looking at the transcript
-# by hand: its lines' leading digits choose the blocks (scripts/test_model.py).
+# The integrations against the real services they ask (scenarios/integrations):
+# the card sites, web search under the keys set, the support desk.
+integrations:
+	$(RUN) pytest scenarios/ -m integration
+
+# A mock llama.cpp on llama.cpp's own port, for looking at the transcript
+# by hand: its lines' leading digits choose the blocks (scripts/mock_model.py).
 # PORT=… moves it, PACE=… sets the seconds between streamed pieces. It runs
 # on the project's conda env's own interpreter, not through `conda run`, so
 # Ctrl+C reaches it alone and it ends quietly.
-TEST_MODEL_PYTHON ?= $(shell conda run -n otaku python -c 'import sys; print(sys.executable)')
-test-model:
-	@$(TEST_MODEL_PYTHON) scripts/test_model.py $(if $(PORT),--port $(PORT)) $(if $(PACE),--pace $(PACE))
+MOCK_MODEL_PYTHON ?= $(shell conda run -n otaku python -c 'import sys; print(sys.executable)')
+mock-model:
+	@$(MOCK_MODEL_PYTHON) scripts/mock_model.py $(if $(PORT),--port $(PORT)) $(if $(PACE),--pace $(PACE))
 
 # The working tree as a wheel, served on this machine's network until
 # Ctrl+C, for another machine to install with the line it prints. Built

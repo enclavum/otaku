@@ -1,6 +1,7 @@
-/* The model picker: every catalog otaku can reach on one tab, and the
-   providers behind them on the other — two halves of one panel, because
-   a model that is missing is fixed on the provider side.
+/* The model picker: every catalog otaku can reach on one tab, its
+   dictation models on a second, and the providers behind them on the
+   third — one panel, because a model that is missing is fixed on the
+   provider side.
 
    It opens the way the terminal's picker does: on the providers on this machine,
    NOW, with each cloud catalog's rows merged in behind the open panel
@@ -24,7 +25,7 @@ import {
 } from "../kit/browser.js";
 import { $, $$, actionButton, element, row, span } from "../kit/dom.js";
 import { contextLabel, gigabytes } from "../kit/format.js";
-import { landed } from "../play/shell.js";
+import { facts, landed, showFacts } from "../play/shell.js";
 
 export async function openModels(answered = "", tab = "models") {
   const popup = popups.get("/model");
@@ -38,18 +39,22 @@ export async function openModels(answered = "", tab = "models") {
   const epoch = ++_opening;
   /* The tabs answer from the first moment, the listing or no: a tab
      picked while it is still asked for is the one its answer builds. */
-  const state = { popup, panel: null, tab, picked: null };
+  // `picked`: the row the reader was on, by tab — the two lists hold different models;
+  // `drawn`: the tab the models pane last drew
+  const state = { popup, panel: null, tab, picked: {}, drawn: null };
   const build = (wanted, notice = "") => {
     state.tab = wanted;
     for (const button of $$(".otk-tab", popup)) {
       button.setAttribute("aria-selected", String(button.dataset.tab === wanted));
     }
+    // The dictation models are the models pane's, its rows the other kind.
+    const shown = wanted === "dictation" ? "models" : wanted;
     for (const pane of $$("[data-pane]", popup)) {
-      pane.hidden = pane.dataset.pane !== wanted;
+      pane.hidden = pane.dataset.pane !== shown;
     }
     if (!state.panel) return;
-    if (wanted === "models") buildModels(state, notice);
-    else buildProviders(state, notice);
+    if (wanted === "providers") buildProviders(state, notice);
+    else buildModels(state, notice, wanted);
   };
   state.build = build;
   for (const button of $$(".otk-tab", popup)) {
@@ -125,12 +130,21 @@ function watchMemory(popup) {
   }, _MEMORY_MS);
 }
 
-// ---------- the models tab ----------
+// ---------- the models tabs ----------
 
-function buildModels(state, notice) {
+/* The completion models (`tab` "models"), or the dictation ones ("dictation"):
+   one list, the rows of the kind the tab shows, each provider captioned
+   with what it holds of that kind. */
+function buildModels(state, notice, tab) {
   const { popup, panel } = state;
   const pane = $('[data-pane="models"]', popup);
-  const offered = panel.providers.flatMap((provider) =>
+  const isDictationTab = tab === "dictation";
+  const kind = isDictationTab ? "dictation" : "completion";
+  const providers = panel.providers.map((provider) => ({
+    ...provider,
+    models: provider.models.filter((model) => model.kinds.includes(kind)),
+  }));
+  const offered = providers.flatMap((provider) =>
     provider.models.map((model) => ({ provider, model, haystack: model.name.toLowerCase() })),
   );
   const local = offered.filter((entry) => entry.provider.locality === "local").length;
@@ -141,7 +155,7 @@ function buildModels(state, notice) {
 
   const use = async (entry) => {
     const model = { provider: entry.provider.id, name: entry.model.name };
-    const answer = await api.app.update({ model });
+    const answer = await api.app.update({ models: { writing: model } });
     // refused, the picker stays, saying why
     if (answer.refused) {
       report(answer.notice);
@@ -173,20 +187,31 @@ function buildModels(state, notice) {
        engine actually DID it — a refused load must not light a lamp on
        a model nothing loaded. */
     if (!answer.refused) entry.model.loaded = wanted;
-    built(state, "models", answer);
+    built(state, tab, answer);
   };
 
   /* Lore extraction pinned to this model, or — on the model pinned —
      back to the one played with. One mark moves, so that is what changes
      here, as a load's lamp does. */
-  const extractWith = async (entry) => {
+  const extractWith = (entry) => pin("extraction", entry);
+
+  /* Dictation pinned to this model, or — on the model pinned — to none:
+     the composer's microphone comes and goes with it. */
+  const dictateWith = async (entry) => {
+    await pin("dictation", entry);
+    showFacts(await facts());
+  };
+
+  /* A role pinned to this model, or — on the model pinned — unpinned;
+     one mark moves, as a load's lamp does. */
+  const pin = async (role, entry) => {
     const spec = `${entry.provider.id}/${entry.model.name}`;
-    const pinned = spec === state.panel.extraction;
+    const pinned = spec === state.panel[role];
     const answer = await api.app.update({
-      extraction_model: pinned ? null : { provider: entry.provider.id, name: entry.model.name },
+      models: { [role]: pinned ? null : { provider: entry.provider.id, name: entry.model.name } },
     });
-    if (!answer.refused) state.panel = { ...state.panel, extraction: pinned ? "" : spec };
-    built(state, "models", answer);
+    if (!answer.refused) state.panel = { ...state.panel, [role]: pinned ? "" : spec };
+    built(state, tab, answer);
   };
 
   if (!offered.length) $("[data-actions]", pane).replaceChildren();
@@ -196,8 +221,13 @@ function buildModels(state, notice) {
      paint and the select below as moves too, and a model that arrives
      with the cloud phase must still be found by that rebuild — not the
      row the paint happened to land on. */
-  const wanted = state.picked ?? panel.current;
   let settled = false;
+  /* Its own tab drawn again — a pin, a load, the cloud phase — the list
+     stays where the reader left it: the first paint scrolls to the top,
+     so the scroll is put back before the row is selected, which then
+     moves the list only where the row is out of sight. */
+  const list = $("[data-list]", pane);
+  const scrolled = state.drawn === tab ? list.scrollTop : null;
   const view = browser(popup, {
     root: pane,
     rows: offered,
@@ -207,11 +237,12 @@ function buildModels(state, notice) {
        rather than captioning an empty stretch. */
     groupOf: (entry) => entry.provider,
     drawGroup: providerHeading,
-    drawRow: (entry) => modelRow(entry, panel),
-    drawPreview: (entry) => modelDetail(pane, entry, panel, { use, setLoaded, extractWith }),
-    onOpen: use,
+    drawRow: (entry) => modelRow(entry, panel, isDictationTab),
+    drawPreview: (entry) =>
+      modelDetail(pane, entry, panel, isDictationTab, { use, setLoaded, extractWith, dictateWith }),
+    onOpen: isDictationTab ? dictateWith : use,
     onMove: (entry) => {
-      if (settled) state.picked = `${entry.provider.id}/${entry.model.name}`;
+      if (settled) state.picked[tab] = `${entry.provider.id}/${entry.model.name}`;
     },
     onKey: (event, entry) => {
       if (event.key !== "l" && event.key !== "u") return false;
@@ -223,15 +254,20 @@ function buildModels(state, notice) {
     empty: (filtered) =>
       filtered
         ? { line: "No model matches that.", hint: "clear the filter, or set up a provider" }
-        : { line: "No model yet.", hint: "start a local engine, or set up a provider" },
+        : isDictationTab
+          ? { line: "No dictation model yet.", hint: "add a speech-to-text model to an engine, or set up a provider" }
+          : { line: "No model yet.", hint: "start a local engine, or set up a provider" },
   });
   // Open where the reader was — or on the model in use, the way back
-  // to it.
-  view.select((entry) => `${entry.provider.id}/${entry.model.name}` === wanted);
+  // to it; among the dictation models, on the one dictation asks.
+  const home = state.picked[tab] ?? (isDictationTab ? panel.dictation : panel.current);
+  if (scrolled !== null) list.scrollTop = scrolled;
+  view.select((entry) => `${entry.provider.id}/${entry.model.name}` === home);
   settled = true;
+  state.drawn = tab;
 }
 
-function modelRow(entry, { current, extraction }) {
+function modelRow(entry, { current, extraction, dictation }, isDictationTab) {
   const lamp = span("otk-row__lamp", "");
   const managed = entry.provider.capabilities?.model_management;
   if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
@@ -239,8 +275,12 @@ function modelRow(entry, { current, extraction }) {
   // extraction — as tags against the figures, beside the size.
   const spec = `${entry.provider.id}/${entry.model.name}`;
   const tags = [];
-  if (spec === current) tags.push(span("otk-tag otk-tag--role", "writing"));
-  if (spec === extraction) tags.push(span("otk-tag otk-tag--role", "extraction"));
+  if (isDictationTab) {
+    if (spec === dictation) tags.push(span("otk-tag otk-tag--role", "dictation"));
+  } else {
+    if (spec === current) tags.push(span("otk-tag otk-tag--role", "writing"));
+    if (spec === extraction) tags.push(span("otk-tag otk-tag--role", "extraction"));
+  }
   const button = row(
     lamp,
     span("otk-row__title", entry.model.name),
@@ -262,13 +302,20 @@ function modelRow(entry, { current, extraction }) {
   return button;
 }
 
-function modelDetail(pane, entry, { current, extraction }, { use, setLoaded, extractWith }) {
+function modelDetail(
+  pane,
+  entry,
+  { current, extraction, dictation },
+  isDictationTab,
+  { use, setLoaded, extractWith, dictateWith },
+) {
   const managed = entry.provider.capabilities?.model_management;
   const where = whereItRuns(entry.provider);
   const state = !managed ? "" : entry.model.loaded ? " · loaded" : " · not loaded";
   const spec = `${entry.provider.id}/${entry.model.name}`;
   const chosen = spec === current;
   const extracting = spec === extraction;
+  const dictating = spec === dictation;
 
   const facts = element("div", "otk-detail__section");
   if (entry.model.size) facts.append(fact("size", entry.model.size));
@@ -278,22 +325,32 @@ function modelDetail(pane, entry, { current, extraction }, { use, setLoaded, ext
   const loaded = entry.model.max_context_loaded;
   if (loaded && loaded !== entry.model.max_context_catalogue) facts.append(fact("served max context", loaded));
   // how its thinking is set, and what else it can do: the info report's
-  // two rows, in the report's own words (`backend.app.reports`)
-  facts.append(fact("reasoning", entry.model.reasoning_words));
-  facts.append(fact("capabilities", entry.model.capability_words));
+  // two rows, in the report's own words (`backend.app.reports`) — a chat
+  // model's alone: a dictation model neither thinks nor does anything else
+  if (!isDictationTab) {
+    facts.append(fact("reasoning", entry.model.reasoning_words));
+    facts.append(fact("capabilities", entry.model.capability_words));
+  }
   facts.append(fact("provider", entry.provider.label));
 
   // Pinned under the pane: the row above is a name of any length, and
   // the button must not move with it.
-  const verbs = [
-    actionButton("Use for this story", {
-      kind: "otk-btn--primary",
-      onclick: guard(() => use(entry)),
-    }),
-    actionButton(extracting ? "Unset extraction model" : "Use for extraction", {
-      onclick: guard(() => extractWith(entry)),
-    }),
-  ];
+  const verbs = isDictationTab
+    ? [
+        actionButton(dictating ? "Unset dictation model" : "Use for dictation", {
+          kind: "otk-btn--primary",
+          onclick: guard(() => dictateWith(entry)),
+        }),
+      ]
+    : [
+        actionButton("Use for this story", {
+          kind: "otk-btn--primary",
+          onclick: guard(() => use(entry)),
+        }),
+        actionButton(extracting ? "Unset extraction model" : "Use for extraction", {
+          onclick: guard(() => extractWith(entry)),
+        }),
+      ];
   if (managed) {
     verbs.push(
       actionButton(entry.model.loaded ? "Unload" : "Load", {
@@ -306,8 +363,9 @@ function modelDetail(pane, entry, { current, extraction }, { use, setLoaded, ext
   return [
     span("otk-label otk-label--accent", `${where}${state}`),
     element("h3", "otk-detail__title", entry.model.name),
-    chosen && element("p", "otk-note otk-accent-ink", "chosen for this story"),
-    extracting && element("p", "otk-note otk-accent-ink", "used for lore extraction"),
+    !isDictationTab && chosen && element("p", "otk-note otk-accent-ink", "chosen for this story"),
+    !isDictationTab && extracting && element("p", "otk-note otk-accent-ink", "used for lore extraction"),
+    isDictationTab && dictating && element("p", "otk-note otk-accent-ink", "used for dictation"),
     facts,
   ].filter(Boolean);
 }
@@ -387,7 +445,7 @@ function providerDetail(state, pane, provider) {
     element(
       "p",
       "otk-note",
-      "The key is kept in the state dir on this machine and sent only to this provider.",
+      "The key is kept in otaku's home folder on this machine and sent only to this provider.",
     ),
   );
 
@@ -690,14 +748,17 @@ async function asked(provider) {
 /** A phase of the listing as the picker draws it: the providers it asked
     — the cloud catalogs arrive with their own phase — and the models in
     use as "provider/name", the name as the provider lists it: the one
-    played with (`current`), the one pinned for lore extraction
-    (`extraction`, "" while it follows). */
+    played with (`current`), lore extraction's (`extraction`, "" while it
+    asks the one played with), dictation's (`dictation`, "" for none). */
 function listingOf(listing, app) {
   const spec = (model) => (model ? `${model.provider}/${model.listed_name}` : "");
+  const current = spec(app.model);
+  const extraction = spec(app.models.extraction);
   return {
     ...listing,
-    current: spec(app.model),
-    extraction: app.extraction_model?.pinned ? spec(app.extraction_model) : "",
+    current,
+    extraction: extraction === current ? "" : extraction,
+    dictation: spec(app.models.dictation),
     providers: listing.providers.filter((entry) => entry.asked).map(providerOf),
   };
 }

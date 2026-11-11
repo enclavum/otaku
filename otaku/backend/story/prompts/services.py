@@ -6,15 +6,15 @@ there: a tool's — what tells the model how to use it,
 the one its switch sends (`of_tool`) — and the rest, which no tool owns,
 the text-completion emulation's (`named`). Read as an assembly reads
 them (`story.settings.services`), so a hand edit shows too; written that
-key alone, the pre-edit file backed up (`settings.prompts.set_prompt`),
+key alone, the pre-edit file backed up (`prompts.set_prompt`),
 and read back — what the next assembly injects is what was saved, or the
 write is refused. An emptied text drops the key, so the shipped text
 stands again."""
 
+from otaku import prompts as prompts_file
 from otaku.backend.app.core.services import App
 from otaku.backend.errors import NotFound, Unavailable
 from otaku.backend.story.settings.services import InjectingSetting, StorySettings, ToolSetting
-from otaku.settings import prompts as prompts_file
 
 
 def of_tool(app: App, tool: str) -> str:

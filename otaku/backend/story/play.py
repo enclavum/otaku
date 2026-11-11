@@ -20,7 +20,7 @@ from collections.abc import Generator, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 
 from otaku.backend.app.core.services import App
-from otaku.backend.app.pictures.services import Picture, RawFile, read_picture, save
+from otaku.backend.app.pictures.services import IntakePicture, RawFile, read_picture, save
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
 from otaku.backend.story.chain import (
     append_message,
@@ -38,9 +38,10 @@ from otaku.context.assembler import ContextOverflowError, context_in_force, get_
 from otaku.context.prompt import AssembledPrompt, JoinType
 from otaku.context.tools import FENCE, Prose, ReplyParser, ToolCall, parse_reply
 from otaku.providers import OpenAIClient, ProviderError, Reasoning, Reply, Stats, Text, templates
-from otaku.settings.state import ModelRef
-from otaku.store.files import Owner
-from otaku.store.schema import Character, Layout, Message, StoryMode
+from otaku.settings.state import ModelRef, ModelRole
+from otaku.store.pictures import Attachment
+from otaku.store.schema import Character, Message
+from otaku.store.story import Layout, StoryMode
 
 # How many pictures one turn may carry, and the refusals that are not
 # about one file: a model that cannot see, too many on one turn.
@@ -211,7 +212,7 @@ def submit_line(
 
 def _checked(
     app: App, line: str, files: Sequence[RawFile], layout: Layout
-) -> tuple[str, syntax.Line, list[Picture]]:
+) -> tuple[str, syntax.Line, list[IntakePicture]]:
     """A line made ready to play in `layout`: as it is recorded, read in
     the story's language, and its pictures read — or Refused."""
     facts = app._model_facts()
@@ -252,7 +253,7 @@ def regenerate_reply(
     than `expected_head` — EAGERLY, before the iterator is returned and
     before anything is dropped (the same validate-then-return-generator
     shape as `submit_line`)."""
-    if app._client(app._model()) is None:
+    if app._client(app._model(ModelRole.WRITING)) is None:
         # Before anything is dropped: without a model there is no fresh
         # take, and the standing reply must survive untouched.
         raise Conflict(NO_MODEL_HINT)
@@ -274,7 +275,7 @@ def _submit_events(
     chain: list[Message],
     frame: syntax.Line,
     line: str,
-    pictures: Sequence[Picture],
+    pictures: Sequence[IntakePicture],
 ) -> Generator[Event, None, None]:
     """`submit`'s stream over the story's chain as it was read, which it
     keeps current as its rows land. Not an undo or a regenerate, so no
@@ -306,7 +307,7 @@ def _submit_events(
     # The pictures go into the folder before the turn records, under the
     # story's number. Nothing was written before this point.
     attachments = tuple(
-        save(app._store.files, picture, Owner.STORY, story_id) for picture in pictures
+        save(app._store.files, picture, story_id, Attachment) for picture in pictures
     )
     row = append_message(
         app,
@@ -397,7 +398,7 @@ def _reply_events(
     answer. `reply_speaker` is the cast member the reply is spoken by,
     when the prompt named one (/you): stored on the reply row, where
     extraction's own labeling is fill-only, so it stands."""
-    model = app._model()
+    model = app._model(ModelRole.WRITING)
     client = app._client(model)
     if model is None or client is None:
         # The turn is recorded — it is story — and plays on a regenerate

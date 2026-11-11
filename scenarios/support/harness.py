@@ -1,4 +1,4 @@
-"""The application, launched in-process over a throwaway state dir.
+"""The application, launched in-process over a throwaway home folder.
 
 `launch` builds the real app — `backend.launch.open_app` owns the config
 load, key ceremony, and assembly — pointed at the scripted server, and
@@ -25,7 +25,7 @@ from pathlib import Path
 
 from otaku import encryption
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, Layout, ModelRef
+from otaku.backend.api import Api, Layout, ModelRef, ModelRole
 from otaku.backend.api import App as BackendApp
 from otaku.backend.app.models.schemas import ModelSettings
 from otaku.backend.app.paths import Paths
@@ -65,7 +65,7 @@ class App:
         # as in the real launcher.
         if spec and self.api.app.get().model is None:
             provider, _, model = spec.partition("/")
-            self.api.app.update(model=ModelRef(provider, model))
+            self.api.app.update(models={ModelRole.WRITING: ModelRef(provider, model)})
         self.chat = Chat(self.backend)
         # The story the last run landed in, resumed — as `run.run` does.
         if (resumed := self.api.settings.get().last_story) is not None:
@@ -146,7 +146,7 @@ def read_store(root: Path) -> Store:
         service=paths.keychain_service,
         retrieve_command=cfg.encryption.retrieve_command,
     )
-    return Store.open(paths.database_file, cipher, backups_dir=paths.backups_dir, keep=0)
+    return Store.open(paths.database_file, cipher, backups_dir=paths.backups_dir)
 
 
 def launch(root: Path, server: ModelServer, *, spec: str | None = SPEC) -> App:
@@ -157,7 +157,7 @@ def launch(root: Path, server: ModelServer, *, spec: str | None = SPEC) -> App:
 
 
 def run_otaku(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """`otaku ARGS` over the state dir at `root`, run for real and
+    """`otaku ARGS` over the home folder at `root`, run for real and
     captured — for the subcommands that print and exit; the pty driver
     (`terminal.py`) owns the interactive journeys."""
     return subprocess.run(
@@ -167,7 +167,7 @@ def run_otaku(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         timeout=30,
         env={
             **os.environ,
-            "OTAKU_CONFIG_DIR": str(root),
+            "OTAKU_HOME": str(root),
             "COLUMNS": "200",
             "OTAKU_UPDATE_URL": "http://127.0.0.1:9/",  # never GitHub
         },
@@ -176,7 +176,7 @@ def run_otaku(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def set_config(root: Path, **fields: object) -> None:
-    """Set Config fields in the state dir's config file — an update of
+    """Set Config fields in the home folder's config file — an update of
     whatever is there (a scenario shrinking the scene thresholds, say).
     Providers live in their own file (`set_config_provider`)."""
     paths = Paths.resolve(root)

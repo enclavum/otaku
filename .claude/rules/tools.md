@@ -8,7 +8,7 @@ paths:
   - "otaku/backend/story/messages/*.py"
   - "otaku/backend/story/settings/*.py"
   - "otaku/web/api/story/messages.py"
-  - "otaku/settings/prompts.py"
+  - "otaku/prompts/**/*"
   - "otaku/terminal/tty/render.py"
   - "otaku/terminal/chat/stream.py"
   - "otaku/web/static/js/play/transcript.js"

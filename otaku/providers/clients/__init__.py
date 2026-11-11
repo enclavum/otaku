@@ -14,19 +14,18 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from otaku import envvars
+
 # The bundles whose own llama-server children listen on ports of their
 # own: theirs, never an engine to configure.
 _NOT_AN_ENGINE = ("Ollama.app", "LM Studio.app", ".lmstudio")
 _PORT_FLAG = re.compile(r"(?:^|\s)--port[= ](\d+)\b")
-# Where otaku runs apart from its engines — in a container — the name of
-# the machine they run on (the Dockerfile sets it).
-_LOCAL_ENGINES_HOST_VAR = "OTAKU_LOCAL_ENGINES_HOST"
 
 
 def local_engines_host() -> str:
     """The host a local engine's section names: `localhost`, or the
     machine `OTAKU_LOCAL_ENGINES_HOST` names (`host.docker.internal`)."""
-    return os.environ.get(_LOCAL_ENGINES_HOST_VAR, "").strip() or "localhost"
+    return os.environ.get(envvars.LOCAL_ENGINES_HOST, "").strip() or "localhost"
 
 
 def read_home_json(relative: str) -> dict[str, Any]:

@@ -42,14 +42,9 @@ from otaku.context.prompt import (
 )
 from otaku.context.tools import ToolSet
 from otaku.providers import PicturesRide
-from otaku.store.schema import (
-    Attachment,
-    Character,
-    InjectionPosition,
-    Message,
-    Scene,
-    StoryMode,
-)
+from otaku.store.pictures import Attachment
+from otaku.store.schema import Character, Message, Scene
+from otaku.store.story import InjectionPosition, StoryMode
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
 CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
@@ -244,6 +239,18 @@ class TestCharacterCards:
             card_framing="<<{name}: {description}>>",
         )
         assert prompt.pieces[0].text == "<<Elara: A smuggler.>>"
+
+    def test_a_card_row_whose_character_has_no_text_sends_the_empty_framing(self) -> None:
+        elara = Character(id=7, name="Elara", profile='user = "Alex"')
+        row = replace(card(1, "Elara joins."), speaker_id=7)
+        prompt = assemble(
+            "",
+            [row, user("I wave.")],
+            8192,
+            characters=(elara,),
+            card_framing="<<{name}: {description}>>",
+        )
+        assert prompt.pieces[0].text == "<<Elara alone>>"
 
     def test_a_card_row_whose_character_is_gone_sends_its_body(self) -> None:
         elara = Character(id=7, name="Elara", profile='description = "A smuggler."')
@@ -1262,9 +1269,9 @@ def replace_history(s: Scene, history: str) -> Scene:
 
 class _CatFolder:
     """A files folder holding the cat and nothing else: the store's own
-    `get`, answered in memory."""
+    `get_picture`, answered in memory."""
 
-    def get(self, name: str) -> tuple[bytes, str] | None:
+    def get_picture(self, name: str) -> tuple[bytes, str] | None:
         return (b"cat", "image/jpeg") if name == CAT.file else None
 
 
@@ -1302,11 +1309,13 @@ class _Characters:
 @dataclass(frozen=True)
 class _Prompts:
     """What the door reads of the prompts: the recap header, the card
-    template, the header over the pinned rows the recap quotes, and the
-    two wires' framings."""
+    template, the header over the pinned rows the recap quotes, the
+    template of a card none of whose fields came up, and the two wires'
+    framings."""
 
     recap_header: str
     card_framing: str = ""
     pinned_header: str = "[[pinned]]"
+    card_empty_framing: str = "<<{name} alone>>"
     story_framing: str = "<<frame {premise}>>"
     tool_framing: str = "<<{tool}: {body}>>"

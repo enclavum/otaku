@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from otaku.backend.base import Schema
 from otaku.backend.story.settings.services import StorySettingLayout
-from otaku.store.schema import InjectionPosition, Layout
+from otaku.store.story import InjectionPosition, Layout
 
 # The layout setting: the name a story stores it under, and the layout a
 # story is read in until it says otherwise — a story not made yet's too.

@@ -1,16 +1,22 @@
 """Shared plumbing for the live smokes (scenarios/live): one real app
 over one real provider, plus the skip-if-absent checks every module
-opens with. A smoke never fails because a server is off or a key is not
-set — it skips, and says why."""
+opens with, and the dictation smoke every provider that dictates runs —
+a sentence spoken by this machine's own voice, written down by the
+provider's dictation model. A smoke never fails because a server is off,
+a key is not set or a provider offers no dictation model — it skips, and
+says why."""
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import httpx
 import pytest
 
+from otaku.backend.api import ModelRef, ModelRole
 from otaku.backend.app.paths import Paths
-from otaku.providers import ALL_CLIENTS, ModelState, UnreachableError
+from otaku.providers import ALL_CLIENTS, ModelKind, ModelState, UnreachableError
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.settings import config as config_mod
 from otaku.settings import providers as providers_mod
@@ -91,3 +97,50 @@ def case_model(provider: str, url: str, key: str, named: str) -> str:
     if not rows:
         pytest.skip(f"{url} lists no models")
     return rows[0].name
+
+
+# What a dictation smoke says aloud, and the words of it that must come
+# back — most of them, as a model may spell a word its own way.
+SPOKEN = "The quick brown fox jumps over the lazy dog."
+_HEARD = ("quick", "brown", "fox", "jumps", "lazy", "dog")
+
+
+def spoken_wav(tmp_path: Path) -> bytes:
+    """`SPOKEN` in this machine's own voice, as a 16 kHz mono WAV — macOS's
+    `say`, converted by `afconvert`; pytest.skip where either is absent."""
+    if not (shutil.which("say") and shutil.which("afconvert")):
+        pytest.skip("no `say` to speak the sentence with")
+    aiff, wav = tmp_path / "spoken.aiff", tmp_path / "spoken.wav"
+    subprocess.run(["say", "-o", str(aiff), SPOKEN], check=True)
+    subprocess.run(
+        ["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", str(aiff), str(wav)],
+        check=True,
+    )
+    return wav.read_bytes()
+
+
+def dictation_model(app: App, provider: str, named: str) -> str:
+    """The model a dictation smoke pins: `named`, else the first `provider`
+    files as a dictation model; pytest.skip when it files none."""
+    if named:
+        return named
+    listing = app.api.providers.list(scope=provider)
+    rows = [
+        model.name
+        for row in listing.providers
+        if row.id == provider
+        for model in row.models
+        if ModelKind.DICTATION in model.kinds
+    ]
+    if not rows:
+        pytest.skip(f"{provider} offers no dictation model")
+    return rows[0]
+
+
+def assert_written_down(app: App, provider: str, model: str, audio: bytes) -> None:
+    """`audio` written down by `model`, pinned for dictation as a reader
+    pins it: most of what was said comes back."""
+    app.api.app.update(models={ModelRole.DICTATION: ModelRef(provider, model)})
+    text = app.api.app.dictation.create(audio=audio, audio_format="wav").value.text.lower()
+    heard = [word for word in _HEARD if word in text]
+    assert len(heard) >= 4, f"heard {text!r}"

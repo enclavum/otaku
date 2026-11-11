@@ -2,7 +2,7 @@
 """Regenerate demo/web/fixtures/ from the real server over the shipped
 sample stories.
 
-The app is opened over a THROWAWAY state dir this script creates and
+The app is opened over a THROWAWAY home folder this script creates and
 deletes — never anyone's real ~/.otaku — so a regeneration can never
 capture personal library content into a committed file. The scenario
 suite's scripted server stands in for an engine, so the app has a real
@@ -32,7 +32,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, ModelRef
+from otaku.backend.api import Api, ModelRef, ModelRole
 from otaku.web import run_beside
 from scenarios.support.harness import set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -141,7 +141,7 @@ def _capture(url: str) -> dict[str, Any]:
 
 
 def _codex(url: str) -> dict[str, Any]:
-    """All characters as the page reads it — the cards as listed, each one
+    """Characters as the page reads it — the cards as listed, each one
     whole, and the stories' characters no card claims."""
     cards = _get(f"{url}/api/cards")[1]["items"]
     return {
@@ -251,7 +251,7 @@ class _served:
             port = int(probe.getsockname()[1])
         set_config(self._root, web_host="127.0.0.1", web_port=port)
         self._app = backend_launch.open_app(self._root)
-        Api(self._app).app.update(model=ModelRef(ENGINE, MODEL))
+        Api(self._app).app.update(models={ModelRole.WRITING: ModelRef(ENGINE, MODEL)})
         self._app.start_worker()
         self._server = run_beside(self._app)
         url = f"http://127.0.0.1:{port}"

@@ -16,8 +16,9 @@ def card(chat: Chat, raw: str) -> None:
     """The terminal's path affordance, then the three-step import:
     resolve `FILE [NAME]` on THIS side (the longest leading token run
     naming a real file is the file, a leading `@` stripped, the rest
-    renames), read the bytes, then check → ask the persona (tty only;
-    the remembered default) → create. The exchange echoes like a played
+    names the character), read the bytes, then check → ask the persona
+    (tty only; the remembered default) → create, under the name asked or
+    the card's own. The exchange echoes like a played
     submission: the typed line (and the ask) erased and re-echoed as the
     grey block, the report and the greeting riding it — so /undo takes
     the screen back whole."""
@@ -26,7 +27,7 @@ def card(chat: Chat, raw: str) -> None:
         chat.say("Usage: /card FILE [NAME]")
         chat.ledger.invalidate()
         return
-    path, rename = paths.file_and_name(argument)
+    path, name = paths.file_and_name(argument)
     try:
         data = path.read_bytes()
     except OSError as e:
@@ -38,7 +39,7 @@ def card(chat: Chat, raw: str) -> None:
         # yet and taken back with a card refused or an ask abandoned.
         with chat.writing() as story_id:
             check = chat.api.stories.cards.create(
-                story_id, data=data, file_name=path.name, rename=rename, validate_only=True
+                story_id, data=data, file_name=path.name, name=name or None, validate_only=True
             )
             persona = _ask_persona(chat, check.persona or "you")
             # The row records the argument as typed — a path is what the
@@ -47,7 +48,7 @@ def card(chat: Chat, raw: str) -> None:
                 story_id,
                 data=data,
                 file_name=path.name,
-                rename=rename,
+                name=check.name,
                 persona=persona,
                 line=f"/card {argument}",
                 expected_head=chat.head,
@@ -85,7 +86,7 @@ def _ask_persona(chat: Chat, default: str) -> str:
     if lead:
         sys.stdout.write(lead)
         chat.ledger.typed(lead)
-    ask = f"User name for the card [{default}]: "
+    ask = f"Persona name for the card [{default}]: "
     answer = input(ask).strip()
     chat.ledger.typed(ask + answer + "\n")
     return answer or default

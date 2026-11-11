@@ -3,11 +3,11 @@ them: the file and its thumbnail, by the name their rows carry — bytes,
 which a browser may keep, since a file never changes once written."""
 
 from otaku.backend.api import Api
-from otaku.backend.app.pictures.schemas import Picture
+from otaku.backend.app.pictures.schemas import ServedPicture
 from otaku.web.api._request import Blob, Route
 
 
-def _blob(picture: Picture) -> Blob:
+def _blob(picture: ServedPicture) -> Blob:
     return Blob(picture.data, picture.media_type)
 
 

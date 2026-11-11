@@ -15,12 +15,14 @@ def _no_shell_keys(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
     """The developer's own shell keys stay out of every offline scenario:
     a catalog whose variable is set is founded at launch and would then
     be listed over the real internet. The live smokes read them on
-    purpose, and a scenario that wants one sets it itself."""
+    purpose, and a scenario that wants one sets it itself. So does the
+    switch that turns the update check off, which its tests expect on."""
     if request.node.get_closest_marker("live"):
         return
     for cls in ALL_CLIENTS.values():
         if cls.env_key:
             monkeypatch.delenv(cls.env_key, raising=False)
+    monkeypatch.delenv("OTAKU_DISABLE_UPDATE_CHECK", raising=False)
 
 
 @pytest.fixture
@@ -35,7 +37,7 @@ def server() -> Iterator[ModelServer]:
 
 @pytest.fixture
 def app(server: ModelServer, tmp_path: Path) -> Iterator[App]:
-    """A freshly launched application over a throwaway state dir."""
+    """A freshly launched application over a throwaway home folder."""
     application = launch(tmp_path / "state", server)
     yield application
     application.close()

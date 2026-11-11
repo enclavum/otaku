@@ -4,7 +4,7 @@ it — each frontend's own `run` is its whole life, and this file only
 opens the app for it and answers for what escapes. `otaku update`
 self-updates (`update.py` is its machinery); `otaku logs …` pages the
 day-rotated logs (the sealed request bodies unlocked through
-`backend.launch`). The state-dir root is resolved HERE (the env var is
+`backend.launch`). otaku's home folder is resolved HERE (the env vars are
 entry-point business) and passed down as a plain path.
 """
 
@@ -18,7 +18,7 @@ from typing import TypeVar
 
 import click
 
-from otaku import __version__, logging
+from otaku import __version__, envvars, logging
 from otaku import update as updater
 from otaku import web as web_frontend
 from otaku.backend import launch as backend_launch
@@ -26,7 +26,7 @@ from otaku.backend.launch import ConfigError, DatabaseError, EncryptionError
 from otaku.formatting import pretty_path
 from otaku.terminal import run as terminal_frontend
 
-_ENV_VAR = "OTAKU_CONFIG_DIR"
+_L = TypeVar("_L", bound=logging.DailyLog)
 
 
 class _DeclaredOrderGroup(click.Group):
@@ -36,11 +36,14 @@ class _DeclaredOrderGroup(click.Group):
         return list(self.commands)
 
 
-def resolve_root() -> Path | None:
-    """The state-dir root from OTAKU_CONFIG_DIR — None for the default
-    (backend owns the default location; the env var is the entry's)."""
-    raw = os.environ.get(_ENV_VAR, "").strip()
-    return Path(raw).expanduser() if raw else None
+class _NameConfigFile(click.Command):
+    """A command whose help names config.toml where it actually is — its
+    `{config_file}` filled in when the help is shown."""
+
+    def format_help_text(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        config = pretty_path(backend_launch.config_path(resolve_root()))
+        self.help = (self.help or "").replace("{config_file}", config)
+        super().format_help_text(ctx, formatter)
 
 
 @click.group(
@@ -50,10 +53,12 @@ def resolve_root() -> Path | None:
     # instead of click's wrapped-and-truncated defaults.
     context_settings={"help_option_names": ["-h", "--help"], "max_content_width": 160},
 )
-@click.version_option(__version__, "-v", "--version", prog_name="otaku")
+@click.version_option(
+    __version__, "-v", "--version", prog_name="otaku", message="%(prog)s %(version)s"
+)
 @click.pass_context
 def main(ctx: click.Context) -> None:
-    """A roleplay client."""
+    """A roleplay app."""
     if sys.platform == "win32":
         # A pipe or a file there takes the ANSI codepage, which has no `→`
         # or `…`; a console is UTF-8 already. Python 3.15 does this itself.
@@ -81,12 +86,34 @@ def main(ctx: click.Context) -> None:
         app.close()
 
 
-@main.command(short_help="Serve the web interface")
-def serve() -> None:
-    """Serve otaku's web interface; address and port are configured in
-    ~/.otaku/configs/config.toml."""
+@main.command(cls=_NameConfigFile, short_help="Serve the web interface")
+@click.option(
+    "--any-host",
+    "is_any_host",
+    is_flag=True,
+    help="Make otaku reachable from other devices (same as --host 0.0.0.0).",
+)
+@click.option("--host", metavar="HOST", help="Override host from settings.")
+@click.option(
+    "--port",
+    metavar="PORT",
+    type=click.IntRange(1, 65535),
+    help="Override port from settings.",
+)
+def serve(host: str | None, is_any_host: bool, port: int | None) -> None:
+    """Serve otaku's web interface; settings are configured in
+    {config_file}."""
     ctx = click.get_current_context()
+    if is_any_host:
+        if host is not None:
+            raise click.UsageError("--any-host and --host cannot be used together.")
+        host = "0.0.0.0"
     root = resolve_root()
+    # Typed for this run: over the environment's and config.toml's.
+    if host is not None:
+        os.environ[envvars.WEB_HOST] = host
+    if port is not None:
+        os.environ[envvars.WEB_PORT] = str(port)
     try:
         app = backend_launch.open_app(root, ask_secret=getpass.getpass)
     except ConfigError as e:
@@ -121,21 +148,10 @@ def serve() -> None:
 # The command's name before 0.9.0, kept so a script or a habit still works;
 # hidden from --help.
 main.add_command(
-    click.Command("web", callback=serve.callback, params=serve.params, help=serve.help, hidden=True)
-)
-
-
-def _crashed(root: Path | None, e: Exception) -> None:
-    """The last resort, wherever a frontend was running: whatever
-    escaped every inner containment. The story is safe — every store
-    write is transactional — so say so, record the traceback, and leave
-    quietly."""
-    path = backend_launch.error_log(root).record("unhandled", e)
-    click.echo(
-        f"otaku crashed — your story is safe in the database. The crash is "
-        f"recorded in {pretty_path(path)}; please attach it to an issue.",
-        err=True,
+    _NameConfigFile(
+        "web", callback=serve.callback, params=serve.params, help=serve.help, hidden=True
     )
+)
 
 
 @main.group(
@@ -185,40 +201,6 @@ def logs_error(day: str | None, list_days: bool) -> None:
     _page(backend_launch.error_log(resolve_root()), day, list_days, "error", logging.render_plain)
 
 
-_L = TypeVar("_L", bound=logging.DailyLog)
-
-
-def _page(
-    log: _L,
-    day: str | None,
-    list_days: bool,
-    name: str,
-    render: Callable[[_L, str], str | Iterable[str]],
-) -> None:
-    """Every `logs` subcommand's body once its log is in hand: list the
-    log's days, or page one day through the log's own renderer — the
-    rendering itself is `logging`'s; only the echoing, the paging and
-    the exit codes live here."""
-    ctx = click.get_current_context()
-    if list_days:
-        days = log.get_days()
-        if not days:
-            click.echo(f"no {name} logs yet")
-        for row in logging.day_rows(days):
-            click.echo(row)
-        return
-    stamp = logging.resolve_day(day)
-    if stamp is None:
-        click.echo(
-            "DAY must be YYYY-MM-DD (or YYYYMMDD), e.g. otaku logs requests 2026-07-25", err=True
-        )
-        ctx.exit(2)
-    if not log.get_path(stamp).exists():
-        click.echo(f"no {name} log for {logging.dashed(stamp)}", err=True)
-        ctx.exit(1)
-    click.echo_via_pager(render(log, stamp))
-
-
 @main.command(short_help="Update otaku to the latest release")
 def update() -> None:
     """Update otaku in place, using the tool that it was installed with.
@@ -254,7 +236,7 @@ def uninstall() -> None:
         ctx.exit(1)
     command = updater.uninstall_command()
     if command is None:
-        # A checkout's data is a state dir like any other's: the purge stands.
+        # A checkout's data is a home folder like any other's: the purge stands.
         click.echo("otaku runs from a git checkout — remove the checked-out repo manually.")
     elif not click.confirm("Uninstall otaku?", default=True, prompt_suffix=" "):
         return
@@ -278,3 +260,58 @@ def uninstall() -> None:
         click.echo("The uninstall did not finish — run it yourself: " + " ".join(command), err=True)
         ctx.exit(1)
     click.echo("Uninstalled otaku.")
+
+
+def resolve_root() -> Path | None:
+    """otaku's home folder as the first of `envvars.HOME` set names it —
+    None for the default (backend owns the default location; the env vars
+    are the entry's)."""
+    for name in envvars.HOME:
+        raw = os.environ.get(name, "").strip()
+        if raw:
+            return Path(raw).expanduser()
+    return None
+
+
+def _crashed(root: Path | None, e: Exception) -> None:
+    """The last resort, wherever a frontend was running: whatever
+    escaped every inner containment. The story is safe — every store
+    write is transactional — so say so, record the traceback, and leave
+    quietly."""
+    path = backend_launch.error_log(root).record("unhandled", e)
+    click.echo(
+        f"otaku crashed — your story is safe in the database. The crash is "
+        f"recorded in {pretty_path(path)}; please attach it to an issue.",
+        err=True,
+    )
+
+
+def _page(
+    log: _L,
+    day: str | None,
+    list_days: bool,
+    name: str,
+    render: Callable[[_L, str], str | Iterable[str]],
+) -> None:
+    """Every `logs` subcommand's body once its log is in hand: list the
+    log's days, or page one day through the log's own renderer — the
+    rendering itself is `logging`'s; only the echoing, the paging and
+    the exit codes live here."""
+    ctx = click.get_current_context()
+    if list_days:
+        days = log.get_days()
+        if not days:
+            click.echo(f"no {name} logs yet")
+        for row in logging.day_rows(days):
+            click.echo(row)
+        return
+    stamp = logging.resolve_day(day)
+    if stamp is None:
+        click.echo(
+            "DAY must be YYYY-MM-DD (or YYYYMMDD), e.g. otaku logs requests 2026-07-25", err=True
+        )
+        ctx.exit(2)
+    if not log.get_path(stamp).exists():
+        click.echo(f"no {name} log for {logging.dashed(stamp)}", err=True)
+        ctx.exit(1)
+    click.echo_via_pager(render(log, stamp))

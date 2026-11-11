@@ -21,7 +21,7 @@ import * as story from "./story.js";
 export { login, whenLost, whenReached, whenUnauthorized } from "./_http.js";
 
 export const api = {
-  app: { ...app.app, machine: app.machine, status: app.status },
+  app: { ...app.app, machine: app.machine, status: app.status, dictation: app.dictation },
   settings: app.settings,
   tools: story.tools,
   prompts: story.prompts,

@@ -2,6 +2,30 @@
 
 See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
+## [0.10.0] - 2026-11-11
+
+Character cards:
+
+- Import from card sites: paste links into the Import cards dialogue. Supported sites: Character
+  Tavern, Chub, Pygmalion, RisuRealm and Wyvern, as well as bare images from Civitai — you can
+  generate a card from an image with "Generate from picture" (below).
+- Generation from pictures. Add a bare picture to the characters library, then press "Generate
+  from picture" in its card; the model writes the card from all of the card's pictures. It needs a
+  model that can see pictures.
+- Support for CHARX and RisuAI cards.
+- Export cards in any format.
+
+Dictation:
+
+- Added in both the web interface and the terminal. Choose a speech-to-text model in the model
+  picker, then start dictation with the mic button in the web interface, or with Ctrl+G in the
+  terminal. What you say is written into the prompt line, to edit before sending.
+
+Improvements:
+
+- Securely delete records from the database, and vacuum it at launch when free pages exceed 25%.
+- Prune log files older than 7 days (adjustable in the settings file).
+
 ## [0.9.0] - 2026-10-31
 
 New features:

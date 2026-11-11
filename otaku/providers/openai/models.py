@@ -9,14 +9,16 @@ the context size it was loaded with — belong to the engine, which
 loads and unloads on its own, so they are asked live on every `get`;
 what the engine does not answer keeps its last word. The listing is
 asked of the engine every time. `_merge` is the one rule of both,
-serving the listing and the one-model read alike.
+serving the listing and the one-model read alike. What a model is used
+as — completion, dictation, or both — is the listing's word (`ModelKind`),
+settled by `_settle_kinds` on every entry served.
 
 Hooks read the engine and nothing else, through the view they are
 handed — one budget and one purpose for the whole ask; the public
 methods make the view, read and write the cache and call the hooks.
 Engines override `_list`, `_get`, `_decode`, `_canonical` and, where
-they manage models, `load` and `unload`; a catalog sets `listing_keyed`
-and `listing_query` instead of a listing of its own. The half reads the
+they manage models, `load` and `unload`; a catalog sets `listing_keyed`,
+`completion_query` and `dictation_query` instead of a listing of its own. The half reads the
 server off its config and the key off its auth, which it asks to verify
 the key before a keyed listing.
 """
@@ -65,6 +67,16 @@ class ModelCapabilities:
     reasoning_budget: bool | None = None
     text_completion: bool | None = None  # the raw text wire exists for it
     structured_output: bool | None = None  # can be held to a JSON schema, or json mode
+
+
+class ModelKind(enum.Enum):
+    """What a model is used as: a completion model writes text — plays a
+    story and extracts its lore, over either wire, the chat one or the
+    raw text one; a dictation model writes speech down, through the
+    engine's transcription endpoint. One model may be both."""
+
+    COMPLETION = "completion"
+    DICTATION = "dictation"
 
 
 class Locality(enum.Enum):
@@ -118,6 +130,9 @@ class ModelInfo:
     # on, as `templates.TEXT_TEMPLATES` names them — where the engine
     # tells it; None where it cannot say.
     text_template: str | None = None
+    # What the model is used as; empty where a read does not say — a
+    # live read never does — and the cache fills it (`_merge`, `_settle_kinds`).
+    kinds: frozenset[ModelKind] = frozenset()
 
     @property
     def context_window(self) -> int | None:
@@ -141,8 +156,18 @@ class OpenAIModels:
     # The listing needs a key the account accepts: a catalog may be
     # public, so a listing alone proves nothing.
     listing_keyed: ClassVar[bool] = False
-    # What /models wants appended for the details (NanoGPT's).
-    listing_query: ClassVar[str] = ""
+    # What /models wants appended for the completion models' details
+    # (NanoGPT's).
+    completion_query: ClassVar[str] = ""
+    # Where a catalog lists its dictation models apart from its
+    # completion ones — a path and its query after the url, "" for none:
+    # rows of that kind alone.
+    dictation_query: ClassVar[str] = ""
+    # Whether the engine's dictation models stand apart from its
+    # completion ones. Where they do not — llama.cpp and Ollama turn a
+    # recording into a chat with a completion model that takes audio —
+    # every model that does takes dictation too (`_settle_kinds`).
+    dictation_models_separated: ClassVar[bool] = True
 
     def __init__(self, config: ProviderConfig, auth: OpenAIAuth, http: Http) -> None:
         self._config = config
@@ -169,7 +194,8 @@ class OpenAIModels:
         with self._lock:
             for model in listed:
                 cached = self._cached_models.get(model.name)
-                fresh[model.name] = model if cached is None else self._merge(cached, model)
+                entry = model if cached is None else self._merge(cached, model)
+                fresh[model.name] = self._settle_kinds(entry)
             self._cached_models = fresh
         return list(fresh.values())
 
@@ -190,7 +216,7 @@ class OpenAIModels:
                 return None
         fresh = self._get(model.name, self._http.within(timeout, "model"))
         if fresh is not None:
-            model = self._merge(model, fresh)
+            model = self._settle_kinds(self._merge(model, fresh))
         with self._lock:
             self._cached_models[model.name] = model
         return model
@@ -303,7 +329,19 @@ class OpenAIModels:
             capabilities=fresh.capabilities or cached.capabilities,
             locality=fresh.locality or cached.locality,
             text_template=fresh.text_template or cached.text_template,
+            kinds=fresh.kinds or cached.kinds,
         )
+
+    @final
+    def _settle_kinds(self, model: ModelInfo) -> ModelInfo:
+        """`model` with the kinds it is used as: the listing's word,
+        completion where none was said, and dictation besides for a
+        model that takes audio where the engine's dictation runs one."""
+        kinds = model.kinds or frozenset({ModelKind.COMPLETION})
+        caps = model.capabilities
+        if not self.dictation_models_separated and caps is not None and caps.audio is True:
+            kinds |= {ModelKind.DICTATION}
+        return model if kinds == model.kinds else replace(model, kinds=kinds)
 
     # ---------- the hooks: each reads the engine and nothing else ----------
 
@@ -320,7 +358,7 @@ class OpenAIModels:
             if not self._auth.api_key:
                 raise UnauthorizedError(f"No api key for {config.name}.")
             self._auth.verify_key(http)
-        data = http.get(f"{config.url}/models{self.listing_query}")
+        data = http.get(f"{config.url}/models{self.completion_query}")
         raw = data.get("data") if isinstance(data, dict) else None
         models = []
         for listed in raw if isinstance(raw, list) else []:
@@ -336,7 +374,30 @@ class OpenAIModels:
                 or positive_int(meta.get("n_ctx")),
             )
             models.append(self._decode(listed, model))
+        if self.dictation_query:
+            models = self._append_dictation_models(models, http)
         return sorted(models, key=lambda model: model.name)
+
+    def _append_dictation_models(self, models: Listing, http: Http) -> Listing:
+        """`models` with the catalog's dictation models filed beside them
+        (`dictation_query`) — a completion model it names too is both. Asked
+        quietly: a dictation list that did not answer costs those rows
+        this time, never the completion ones."""
+        data = http.get(f"{self._config.url}{self.dictation_query}", quiet=True)
+        raw = data.get("data") if isinstance(data, dict) else None
+        entries = raw if isinstance(raw, list) else []
+        named = {
+            str(entry["id"])
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+        }
+        both = frozenset({ModelKind.COMPLETION, ModelKind.DICTATION})
+        filed = [replace(model, kinds=both) if model.name in named else model for model in models]
+        listed = {model.name for model in models}
+        return filed + [
+            ModelInfo(name, kinds=frozenset({ModelKind.DICTATION}))
+            for name in sorted(named - listed)
+        ]
 
     def _load(self, model: str, http: Http, cut: Cut) -> None:
         """The engine's load order and the wait for it, through the

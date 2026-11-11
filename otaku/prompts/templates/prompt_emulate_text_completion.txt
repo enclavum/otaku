@@ -1,0 +1,5 @@
+Behave as a text completion: the story is one continuous text,
+and you continue it exactly from where it ends. When the last sentence is
+unfinished, finish it without repeating any of its words; when it is
+finished, begin the next paragraph. Take over the turn wherever the text
+stops.

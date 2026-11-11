@@ -15,8 +15,7 @@ from otaku.backend.app.core.services import App
 from otaku.backend.app.pictures.services import RawFile, read_picture, save
 from otaku.backend.errors import NotFound, Refused
 from otaku.backend.story.settings.services import StorySettingQuestions
-from otaku.store.files import Owner
-from otaku.store.schema import Attachment
+from otaku.store.pictures import Attachment
 
 # What the launch says once a sample landed (`LaunchFacts.hint`).
 HINT = (
@@ -36,7 +35,7 @@ _SAMPLE_PICTURE = re.compile(r"^(?P<stem>.+)\.(?P<message>\d+)\.(?P<order>\d+)\.
 # The river sample ends on a question, and a tool that is off has its
 # calls neither drawn nor sent: it lands with the questions tool on.
 _ASKING_SAMPLE = "river.md"
-# Which of the samples' characters are kept in All characters, beside them.
+# Which of the samples' characters are kept in Characters, beside them.
 _SAMPLE_CARDS = "cards.toml"
 # The text fields a manifest row may set on its card, beside `examples`.
 _CARD_TEXTS = ("tagline", "description", "personality", "scenario", "greeting")
@@ -100,7 +99,7 @@ def _seed_pictures(app: App, story_id: int, document: Path) -> list[str]:
             notices.append(f"The sample picture {name} could not be added ({e}).")
             continue
         by_message.setdefault(number, []).append(
-            save(app._store.files, picture, Owner.STORY, story_id)
+            save(app._store.files, picture, story_id, Attachment)
         )
     for number, attachments in by_message.items():
         app._store.messages.set_attachments(ids[number - 1], attachments)
@@ -108,7 +107,7 @@ def _seed_pictures(app: App, story_id: int, document: Path) -> list[str]:
 
 
 def _seed_cards(api: Api, story_id: int, document: Path) -> list[str]:
-    """The sample's characters into All characters, as the samples' own
+    """The sample's characters into Characters, as the samples' own
     manifest names them (`_SAMPLE_CARDS`): each made from its story's
     character and linked to it, the fields the row gives laid over what
     the character brought (`_card_fields`), and its portrait — a picture

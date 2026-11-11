@@ -16,13 +16,13 @@ Past releases:
 | 0.7 | text completion and story mode, a web search tool call | 2026-10-06 |
 | 0.8 | characters library, adding and removing characters outside stories, inviting characters into a story | 2026-10-17 |
 | 0.9 | chapters, pinned messages, structured context preview | 2026-10-31 |
+| 0.10 | dictation, card import from sites, card generation from pictures | 2026-11-11 |
 
 Planned releases:
 
 | Version | Features |
 |:---:|:---|
-| 0.10 | card import from online resources, audio input |
-| 0.11 | lorebooks in addition to automatic lore extraction |
-| 0.12 | import of SillyTavern and some other tools' lorebooks |
-| 0.13 | a helper model called before and after each turn; per-character context |
-| 0.14 | image generation |
+| 0.11 | story supervisor and illustrator |
+| 0.12 | lorebooks in addition to automatic lore extraction |
+| 0.13 | import of SillyTavern and some other tools' lorebooks |
+| 0.14 | multi-character chats and per-character context |

@@ -1,6 +1,7 @@
 """omlx: an MLX model server speaking the OpenAI protocol for chat,
 with its own registry and load/unload surface under /v1/models, each
-model's type (a VLM takes images) in the status listing, and
+model's type (a VLM takes images, a speech-to-text model takes
+dictation, and no chat) in the status listing, and
 Anthropic's token count at /v1/messages/count_tokens. A reasoning effort
 rides in `chat_template_kwargs` alone, forwarded into the template
 verbatim: the flag gates reasoning, the effort is a template variable.
@@ -27,6 +28,7 @@ from otaku.providers.openai.models import (
     Locality,
     ModelCapabilities,
     ModelInfo,
+    ModelKind,
     ModelState,
     OpenAIModels,
 )
@@ -35,8 +37,10 @@ from otaku.settings.providers import ProviderConfig
 
 # The types a chat can be had with; the embedding, reranker and audio
 # kinds answer a chat with a 400, and the markitdown pseudo-model with a
-# document conversion.
+# document conversion. The transcription endpoint takes the speech-to-text
+# type alone: a completion model that takes audio is refused there.
 _LANGUAGE_MODELS = frozenset({"llm", "vlm"})
+_SPEECH_TO_TEXT = "audio_stt"
 # Config types omlx serves through mlx-vlm and types "vlm" without any
 # vision: two native text families, and two of Gemma 4's it serves that
 # way whether or not the checkpoint keeps its vision weights.
@@ -58,7 +62,8 @@ class OmlxModels(OpenAIModels):
     # ---------- the hooks ----------
 
     def _list(self, http: Http) -> Listing:
-        """Everything from the one /v1/models/status pass; a model the
+        """Everything from the one /v1/models/status pass — the chat
+        models, and the speech-to-text ones for dictation; a model the
         operator hid, or a speculative drafter, is not offered. Loud: a
         server still starting (503), or refusing the key, is the
         listing's own sentence. A 404 alone — no status surface, not an
@@ -75,9 +80,19 @@ class OmlxModels(OpenAIModels):
             if not isinstance(model_id, str) or entry.get("is_hidden") or entry.get("is_helper"):
                 continue
             kind = entry.get("model_type")
+            state, context_loaded = self._state_of(entry)
+            if kind == _SPEECH_TO_TEXT:
+                models.append(
+                    ModelInfo(
+                        name=model_id,
+                        size=positive_int(entry.get("estimated_size")),
+                        state=state,
+                        kinds=frozenset({ModelKind.DICTATION}),
+                    )
+                )
+                continue
             if isinstance(kind, str) and kind and kind not in _LANGUAGE_MODELS:
                 continue
-            state, context_loaded = self._state_of(entry)
             models.append(
                 ModelInfo(
                     name=model_id,

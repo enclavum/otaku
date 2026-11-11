@@ -34,6 +34,20 @@ field), over `api.integrations.web_search`. What is asked of an
 integration and what is made of its answer is the asker's: the web
 search tool composes what the model reads.
 
+## Card sites
+
+No card site is named outside `integrations/cards.py`, the one
+place a link becomes a card's file. What a link gives is always a card
+FILE, imported as a picked file is (`codex.cards.services.fetch_card`;
+a JSON card with its picture beside it packed into one CHARX,
+`formats.cards.pack_charx`), so no import learns a site — with, beside
+it, the line the site shows the card under where it has one, which a
+card made of the file takes as its tagline (the page sends it back with
+the file, as `tagline`). The fetch
+runs off the app's thread (`any_thread`), and a new site is a function,
+and its name and hosts in the module's table (`_SITES`), which both
+dialogs list as the supported sites (`api.integrations.cards`).
+
 ## Locality
 
 Where a server runs is `providers.Locality`, whose docstring holds each

@@ -18,9 +18,9 @@ from typing import Any
 
 import pytest
 
-from otaku.backend.api import ModelRef, Refused
+from otaku.backend.api import ModelRef, ModelRole, Refused
 from otaku.backend.app.paths import Paths
-from otaku.backend.formats import exports, imports
+from otaku.backend.formats.stories import exports, imports
 from otaku.backend.story.lore.schemas import Extraction
 from otaku.store.schema import Message
 from otaku.terminal.screens import dossier as screen_dossier
@@ -307,7 +307,7 @@ class TestExtractSeesPictures:
             _play(app, "Look at this door.", [_cat()])
             app.play("And the hall beyond.")
             # the pass runs on a model that cannot see: the generic provider's
-            app.api.app.update(model=ModelRef("generic", "test-model"))
+            app.api.app.update(models={ModelRole.WRITING: ModelRef("generic", "test-model")})
             app.play("/extract")
             analyst = analyst_prompt(app)
             assert isinstance(analyst, str) and "(picture 1)" in analyst
@@ -1146,7 +1146,9 @@ class TestWarmUp:
             set_config_provider(root, server, name="ollama")
             app = launch(root, server, spec="ollama/test-model")
             try:
-                app.api.app.update(extraction_model=ModelRef("ollama", "extract-model"))
+                app.api.app.update(
+                    models={ModelRole.EXTRACTION: ModelRef("ollama", "extract-model")}
+                )
                 remembered(app)
                 assert _warm_requests(app.server, within=5.0) == 1
                 assert _asked(app.server, analyst=True) == {"extract-model"}
@@ -1166,7 +1168,9 @@ class TestWarmUp:
             set_config_provider(root, server, name="ollama")
             app = launch(root, server, spec="ollama/test-model")
             try:
-                app.api.app.update(extraction_model=ModelRef("ollama", "extract-model"))
+                app.api.app.update(
+                    models={ModelRole.EXTRACTION: ModelRef("ollama", "extract-model")}
+                )
                 for i in range(3):
                     app.play(f"Turn number {i}.")
                 app.server.script = _garbled_analysis

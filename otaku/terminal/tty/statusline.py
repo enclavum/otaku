@@ -113,12 +113,14 @@ class StatusLine:
         self._rows = 0
         self._open = False
 
-    def fragments(self) -> StyleAndTextTuples:
+    def fragments(self, note: str = "") -> StyleAndTextTuples:
         """The row as the prompt's toolbar draws it, the terminal's width
         as the pinned row measures it, the link's ends taking no width —
-        prompt_toolkit has no links of its own. The toolbar's row is held
-        for the whole prompt, so drawing it never reflows the screen."""
-        line = self._line(shutil.get_terminal_size().columns, self._last_note())
+        prompt_toolkit has no links of its own; `note`, given, stands in
+        the last reply's place: what the prompt itself is doing (a
+        dictation). The toolbar's row is held for the whole prompt, so
+        drawing it never reflows the screen."""
+        line = self._line(shutil.get_terminal_size().columns, note or self._last_note())
         paints = _paints()
         return [
             ("[ZeroWidthEscape]", text) if paint == _LINK else (paints[paint][0], text)

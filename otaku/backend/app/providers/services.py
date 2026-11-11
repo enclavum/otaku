@@ -1,5 +1,5 @@
-"""The providers as the app holds them: the model in use and the one
-pinned for lore extraction, switched or pinned by name; every provider
+"""The providers as the app holds them: the model pinned for each role —
+the writing one, the model in use, switched — by name; every provider
 in a scope asked for its models; a provider's own section — its url and
 key — and the models it loads.
 
@@ -20,15 +20,61 @@ from otaku.formatting import toml_key, toml_scalar
 from otaku.providers import (
     ALL_CLIENTS,
     Locality,
+    ModelInfo,
+    ModelKind,
     ProviderConfig,
     ProviderFailure,
     ProviderInfo,
 )
 from otaku.settings.migrations import PROMPT_CACHE_ROW, surgery
-from otaku.settings.state import ModelRef
+from otaku.settings.state import ModelRef, ModelRole
 
 # The two fields of a section a panel edits.
 ProviderField = Literal["url", "api_key"]
+
+
+@dataclass(frozen=True)
+class _ModelPin:
+    """What a role's pin takes and says: the kind of model it asks, and
+    the sentences for a model pinned, pinned already, and none pinned,
+    now or already — the writing one never unpinned, refused instead.
+    `{spec}` is the model's."""
+
+    kind: ModelKind
+    pinned: str
+    pinned_already: str
+    unpinned: str
+    unpinned_already: str
+
+
+_MODEL_PINS = {
+    ModelRole.WRITING: _ModelPin(
+        ModelKind.COMPLETION,
+        "Switched to {spec}.",
+        "Already using {spec}.",
+        "",
+        "A story always has a model: choose another one instead.",
+    ),
+    ModelRole.EXTRACTION: _ModelPin(
+        ModelKind.COMPLETION,
+        "Lore extraction uses {spec}.",
+        "Lore extraction already uses {spec}.",
+        "Lore extraction uses the model you play with.",
+        "Lore extraction already uses the model you play with.",
+    ),
+    ModelRole.DICTATION: _ModelPin(
+        ModelKind.DICTATION,
+        "Dictation now uses {spec}.",
+        "Dictation already uses {spec}.",
+        "Dictation model unset.",
+        "No dictation model is set.",
+    ),
+}
+# What a model of the wrong kind is told, by the kind it is not.
+_NOT_OF_KIND = {
+    ModelKind.COMPLETION: "{spec} is not a chat model.",
+    ModelKind.DICTATION: "{spec} does not take dictation.",
+}
 
 
 @dataclass(frozen=True)
@@ -49,62 +95,61 @@ class Listing:
 # ---------- the models in use ----------
 
 
-def switch_model(app: App, provider: str, model: str) -> str:
-    """Play on `model` from now on, keeping the story (compare models on
-    one prompt: switch, then regenerate), remembered as its provider
-    lists it (`_as_listed`) — and the sentence, what the model's saved
-    settings had to be told included (`App._make_current`). The model
-    already in use says so. Raises Refused for a provider that is not
-    configured, and a switch that could not be saved."""
+def pin_model(app: App, role: ModelRole, provider: str, name: str) -> str:
+    """A model of its own for `role` — any the picker lists of the kind
+    the role asks, the writing one included — remembered as its provider
+    lists it (`_listed`), as given where it has not listed it. The
+    writing one is the model in use: the story is kept (compare models on
+    one prompt: switch, then regenerate) and the model made current, what
+    its saved settings had to be told joining the sentence
+    (`App._make_current`); another role's stays when that one changes,
+    but for an extraction model it becomes, saved apart no more
+    (`settings.state.save`). Raises Refused for a provider that is not
+    configured, a listed model not of the role's kind, and a pin that
+    could not be saved."""
     if provider not in app._providers.list():
         raise NotFound(f"Unknown provider {provider!r}.")
-    wanted = ModelRef(provider, _as_listed(app, provider, model))
-    if app._model() == wanted:
-        return f"Already using {wanted.spec}."
-    app._update_state_config(model=wanted.spec)
-    notes = app._make_current()
-    return " ".join([f"Switched to {wanted.spec}.", *notes])
+    pin = _MODEL_PINS[role]
+    found = _listed(app, provider, name)
+    model = ModelRef(provider, found.name if found is not None else name)
+    if found is not None and pin.kind not in found.kinds:
+        raise Invalid(_NOT_OF_KIND[pin.kind].format(spec=model.spec))
+    if app._model(role) == model:
+        return pin.pinned_already.format(spec=model.spec)
+    app._update_state_config(models={**app._state_config().models, role: model.spec})
+    said = pin.pinned.format(spec=model.spec)
+    return " ".join([said, *app._make_current()]) if role is ModelRole.WRITING else said
 
 
-def pin_extraction_model(app: App, provider: str, model: str) -> str:
-    """A model of its own for lore extraction — any the picker lists, the
-    one played with included: saved, it stays when that one changes.
-    Remembered as its provider lists it (`_as_listed`). Raises Refused
-    for a provider that is not configured."""
-    if provider not in app._providers.list():
-        raise NotFound(f"Unknown provider {provider!r}.")
-    wanted = ModelRef(provider, _as_listed(app, provider, model))
-    if app._extraction_pin() == wanted:
-        return f"Lore extraction already uses {wanted.spec}."
-    app._update_state_config(extraction_model=wanted.spec)
-    return f"Lore extraction uses {wanted.spec}."
+def unpin_model(app: App, role: ModelRole) -> str:
+    """The model pinned for `role` forgotten: extraction asks the writing one
+    again, dictation has none. Raises Invalid for the writing one: a story
+    always has one, so the way off it is another."""
+    pin = _MODEL_PINS[role]
+    if role is ModelRole.WRITING:
+        raise Invalid(pin.unpinned_already)
+    saved = app._state_config().models
+    if role not in saved:
+        return pin.unpinned_already
+    app._update_state_config(
+        models={held: spec for held, spec in saved.items() if held is not role}
+    )
+    return pin.unpinned
 
 
-def unpin_extraction_model(app: App) -> str:
-    """The model pinned for lore extraction forgotten: extraction asks the
-    model played with again."""
-    if app._extraction_pin() is None:
-        return "Lore extraction already uses the model you play with."
-    app._update_state_config(extraction_model="")
-    return "Lore extraction uses the model you play with."
-
-
-def _as_listed(app: App, provider: str, model: str) -> str:
-    """`model` as `provider` lists it — Ollama lists a bare name under
-    its ":latest" tag — so a model chosen is written down as it is: a
-    local engine asked at once, as `App._make_current` asks it, anything
-    else answering from what it last listed; as given where it has not
-    listed the model."""
+def _listed(app: App, provider: str, model: str) -> ModelInfo | None:
+    """`model`'s row as `provider` lists it — Ollama lists a bare name
+    under its ":latest" tag: a local engine asked at once, as
+    `App._make_current` asks it, anything else answering from what it
+    last listed; None where it has not listed the model."""
     client = app._providers.get(provider)
     if client is None:
-        return model
-    found = None
+        return None
     if client.locality is Locality.LOCAL:
         with contextlib.suppress(Exception):
-            found = client.models.get(model)
-    else:
-        found = client.models.cached(model)
-    return found.name if found is not None else model
+            return client.models.get(model)
+        return None
+    return client.models.cached(model)
 
 
 # ---------- the listing ----------

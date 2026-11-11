@@ -29,7 +29,8 @@ from otaku.context import syntax, tools
 from otaku.context.assembler import get_join_type
 from otaku.context.prompt import JoinType
 from otaku.context.tools import Prose
-from otaku.store.schema import Layout, Message
+from otaku.store.schema import Message
+from otaku.store.story import Layout
 
 
 @dataclass(frozen=True)

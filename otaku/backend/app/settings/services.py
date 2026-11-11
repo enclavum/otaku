@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from otaku import envvars
 from otaku.backend.app import passwords
 from otaku.backend.app.core.services import App
 from otaku.backend.errors import Conflict, Invalid, Unavailable
@@ -26,15 +27,6 @@ from otaku.formatting import toml_scalar
 from otaku.settings import row
 from otaku.settings.config import TerminalSettings, WebSettings
 from otaku.settings.migrations import surgery
-
-# The web's host, port, sign-in password and https (on/off), and whether
-# the terminal serves the web beside it (on/off), from the environment,
-# over config.toml's.
-_TERMINAL_SERVE_VAR = "OTAKU_TERMINAL_SERVE"
-_WEB_HOST_VAR = "OTAKU_WEB_HOST"
-_WEB_PORT_VAR = "OTAKU_WEB_PORT"
-_WEB_PASSWORD_VAR = "OTAKU_WEB_PASSWORD"
-_WEB_HTTPS_VAR = "OTAKU_WEB_HTTPS"
 
 
 @dataclass(frozen=True)
@@ -75,7 +67,7 @@ def get_terminal_settings(app: App) -> TerminalSettings:
     whether it serves the web beside it — `OTAKU_TERMINAL_SERVE` (on/off)
     over the file's, read with every call."""
     terminal = app._config().terminal
-    env_serve = os.environ.get(_TERMINAL_SERVE_VAR, "").strip().lower()
+    env_serve = os.environ.get(envvars.TERMINAL_SERVE, "").strip().lower()
     if env_serve in ("on", "off"):
         terminal = replace(terminal, serve=env_serve == "on")
     return terminal
@@ -90,16 +82,16 @@ def get_web_settings(app: App) -> tuple[WebSettings, Path, Path]:
     out of range, https neither on nor off — is passed over, and the
     launch says so (`unusable_variables`)."""
     web = app._config().web
-    env_host = os.environ.get(_WEB_HOST_VAR, "").strip()
+    env_host = os.environ.get(envvars.WEB_HOST, "").strip()
     if env_host:
         web = replace(web, host=env_host)
-    env_port = os.environ.get(_WEB_PORT_VAR, "").strip()
+    env_port = os.environ.get(envvars.WEB_PORT, "").strip()
     if env_port.isdigit() and 1 <= int(env_port) <= 65535:
         web = replace(web, port=int(env_port))
-    env_password = os.environ.get(_WEB_PASSWORD_VAR, "")
+    env_password = os.environ.get(envvars.WEB_PASSWORD, "")
     if env_password:
         web = replace(web, password=_hashed(env_password))
-    env_https = os.environ.get(_WEB_HTTPS_VAR, "").strip().lower()
+    env_https = os.environ.get(envvars.WEB_HTTPS, "").strip().lower()
     if env_https in ("on", "off"):
         web = replace(web, https=env_https == "on")
     return web, app._paths.custom_web_dir, app._paths.cert_dir
@@ -109,10 +101,10 @@ def unusable_variables() -> list[str]:
     """A sentence for each settings variable set to what it cannot hold,
     the file's value used in its place — for the launch to say."""
     said = []
-    port = os.environ.get(_WEB_PORT_VAR, "").strip()
+    port = os.environ.get(envvars.WEB_PORT, "").strip()
     if port and not (port.isdigit() and 1 <= int(port) <= 65535):
-        said.append(f"{_WEB_PORT_VAR}={port!r} is not a port; config.toml's is used.")
-    for name in (_WEB_HTTPS_VAR, _TERMINAL_SERVE_VAR):
+        said.append(f"{envvars.WEB_PORT}={port!r} is not a port; config.toml's is used.")
+    for name in (envvars.WEB_HTTPS, envvars.TERMINAL_SERVE):
         value = os.environ.get(name, "").strip()
         if value and value.lower() not in ("on", "off"):
             said.append(f"{name}={value!r} is neither on nor off; config.toml's is used.")

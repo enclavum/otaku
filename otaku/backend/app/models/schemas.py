@@ -5,7 +5,7 @@ from __future__ import annotations
 from otaku.backend.app.core.services import App
 from otaku.backend.app.models import services as domain_models
 from otaku.backend.base import Schema
-from otaku.providers import Locality, ModelCapabilities, ModelInfo, ModelState
+from otaku.providers import Locality, ModelCapabilities, ModelInfo, ModelKind, ModelState
 
 
 def as_model(app: App, row: ModelInfo) -> Model:
@@ -24,6 +24,7 @@ def as_model(app: App, row: ModelInfo) -> Model:
         text_template=domain_models.template_of(app, row),
         reasoning_words=domain_models.reasoning_words(row.capabilities),
         capability_words=domain_models.capability_words(row.capabilities),
+        kinds=row.kinds,
     )
 
 
@@ -32,9 +33,10 @@ class Model(Schema):
     engines only), the window a request gets, the model's own and the
     loaded instance's where they differ, its longest reply, what it can
     do (None where the provider says nothing of it), whether it is
-    loaded, where it is served where that differs from its provider's —
-    and the text template the text wire would render it with (None where
-    none is known) and how the info report words what it can do."""
+    loaded, where it is served where that differs from its provider's,
+    what it is used as — chat, dictation, or both — and the text
+    template the text wire would render it with (None where none is
+    known) and how the info report words what it can do."""
 
     name: str
     size: int | None
@@ -48,6 +50,7 @@ class Model(Schema):
     text_template: str | None
     reasoning_words: str
     capability_words: str
+    kinds: frozenset[ModelKind]
 
 
 class ModelSettings(Schema):

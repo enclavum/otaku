@@ -7,9 +7,11 @@ for an answer about one story told with the head it stands at, `Blob`
 for a read that answers with bytes. `plain` is the JSON of a
 representation and `changed` of a write's answer; `PreconditionRequired`
 is the fault a row may raise itself; `Route`
-and `Stream` are the two shapes a table's row takes. `web.server` takes
+and `Stream` are the two shapes a table's row takes, and `unqueued`
+marks a row the server answers off the app's thread. `web.server` takes
 a request apart into these and carries the result back."""
 
+import base64
 import enum
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -178,7 +180,8 @@ def plain(value: object) -> Any:
     """A representation as JSON writes it: a dataclass as an object of
     its fields, an enum by its value, a sequence as an array (a set's
     members sorted), a mapping as an object keyed by its keys' plain
-    form, a datetime in ISO 8601 — and two values whose JSON says more
+    form, a datetime in ISO 8601, bytes as base64 — as the page sends a
+    file's — and two values whose JSON says more
     than their fields: a position by its value and the text every
     frontend names it by, an amount of money by its figure (a string: a
     decimal must not become a float), its currency and its text."""
@@ -188,6 +191,8 @@ def plain(value: object) -> Any:
         return plain(value.value)
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
     if isinstance(value, InjectionPosition):
         return {"value": value.value, "text": value.text}
     if isinstance(value, Money):
@@ -216,3 +221,19 @@ def changed(answer: Changed[Any]) -> dict[str, Any]:
 # the reply's events, validated before the first one is asked for.
 Route = Callable[[Api, Ask], Any]
 Stream = Callable[[Api, Ask], Iterator[PlayEvent]]
+
+# The rows whose call never takes the app's thread (`unqueued`).
+_UNQUEUED: set[Route] = set()
+
+
+def unqueued(route: Route) -> Route:
+    """Marks a row whose call never takes the app's thread — a verb safe
+    from any thread (`backend.base.any_thread`), slow on purpose — so the
+    server answers it on the request's own and nothing waits behind it."""
+    _UNQUEUED.add(route)
+    return route
+
+
+def is_unqueued(route: Route) -> bool:
+    """Whether the server answers `route` off the app's thread."""
+    return route in _UNQUEUED

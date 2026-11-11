@@ -87,6 +87,7 @@ from otaku.web.api._request import (
     Stream,
     Tagged,
     etag,
+    is_unqueued,
 )
 from otaku.web.api.app import (
     core,
@@ -159,6 +160,7 @@ __all__ = [
     "event",
     "history",
     "integrations",
+    "is_unqueued",
     "language",
     "lore",
     "machine",

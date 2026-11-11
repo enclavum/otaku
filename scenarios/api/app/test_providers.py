@@ -9,7 +9,9 @@ under the request. The text wire: the prompt alone, an effort on the
 text knobs, the continuation as text. The listing: one pass per provider,
 the rows read as far as the native API sees, capabilities decoded from
 what each provider reports and None where it reports nothing, the one
-model ask reading Ollama's card. The counts, the loads, the keys, the
+model ask reading Ollama's card. Dictation: which models each provider
+files for it, and a recording sent up as a form and its text read back.
+The counts, the loads, the keys, the
 probe, the balance, and the error family, each with its sentence — and
 the provider panel: a section's url and key saved where they live, the
 generic provider, and what the panel says of each engine.
@@ -38,6 +40,7 @@ from otaku.providers import (
     KeySource,
     Locality,
     ModelCapabilities,
+    ModelKind,
     ModelState,
     ProbeStatus,
     ProviderConfig,
@@ -1464,6 +1467,115 @@ class TestCapabilities:
         assert GenericClient(_config(server, "generic")).models.list()[0].capabilities is None
 
 
+class TestDictation:
+    """Which models a provider files for dictation — beside, or apart from,
+    its completion ones — and the transcription wire."""
+
+    def test_llamacpp_files_a_model_that_takes_audio_for_both(self) -> None:
+        # Its transcription endpoint is a chat with the model: one that
+        # takes audio takes dictation; one that does not, completion alone.
+        server = ModelServer(models=("m",))
+        server.window = 8192
+        try:
+            server.props = {"modalities": {"vision": False, "audio": True}}
+            row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
+            assert row.kinds == {ModelKind.COMPLETION, ModelKind.DICTATION}
+            server.props = {"modalities": {"vision": False, "audio": False}}
+            row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
+            assert row.kinds == {ModelKind.COMPLETION}
+        finally:
+            server.close()
+
+    def test_ollama_files_a_model_whose_row_names_audio_for_both(self) -> None:
+        server = ModelServer(models=("hears", "deaf"), managed=True)
+        server.capabilities["hears"] = ["completion", "audio"]
+        server.capabilities["deaf"] = ["completion"]
+        try:
+            rows = {r.name: r for r in OllamaClient(_config(server, "ollama")).models.list()}
+            assert rows["hears"].kinds == {ModelKind.COMPLETION, ModelKind.DICTATION}
+            assert rows["deaf"].kinds == {ModelKind.COMPLETION}
+        finally:
+            server.close()
+
+    @pytest.mark.parametrize(
+        ("version", "kinds"),
+        [
+            ({"transcribe": True}, {ModelKind.COMPLETION, ModelKind.DICTATION}),
+            ({"audio": True}, {ModelKind.COMPLETION, ModelKind.DICTATION}),
+            ({"vision": True}, {ModelKind.COMPLETION}),
+        ],
+    )
+    def test_koboldcpp_files_its_model_by_whisper_or_a_model_that_takes_audio(
+        self, version: dict[str, bool], kinds: set[ModelKind]
+    ) -> None:
+        # Whisper loaded beside the model, or the model itself taking
+        # audio: either way the one model listed is the one asked.
+        server = ModelServer(models=("koboldcpp/m",))
+        server.kobold_model = "koboldcpp/m"
+        server.version = version
+        try:
+            row = KoboldCppClient(_config(server, "koboldcpp")).models.list()[0]
+            assert row.kinds == kinds
+        finally:
+            server.close()
+
+    def test_omlx_lists_its_speech_to_text_models_for_dictation_alone(self) -> None:
+        # Its transcription endpoint takes a speech-to-text model and no
+        # other; a text-to-speech model is neither kind and not listed.
+        server = ModelServer(models=("lm", "stt", "tts"))
+        server.status = True
+        server.types = {"lm": "llm", "stt": "audio_stt", "tts": "audio_tts"}
+        try:
+            rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models.list()}
+            assert set(rows) == {"lm", "stt"}
+            assert rows["lm"].kinds == {ModelKind.COMPLETION}
+            assert rows["stt"].kinds == {ModelKind.DICTATION}
+        finally:
+            server.close()
+
+    @pytest.mark.parametrize("kind", ["openrouter", "nanogpt"])
+    def test_a_catalog_files_its_dictation_list_beside_its_completion_models(
+        self, server: ModelServer, kind: str
+    ) -> None:
+        # A model on both lists is both kinds.
+        server.models = ["chat", "both"]
+        server.dictation_models = ["whisper", "both"]
+        client = ALL_CLIENTS[kind](_config(server, kind, api_key="k"))
+        rows = {r.name: r for r in client.models.list()}
+        assert rows["chat"].kinds == {ModelKind.COMPLETION}
+        assert rows["whisper"].kinds == {ModelKind.DICTATION}
+        assert rows["both"].kinds == {ModelKind.COMPLETION, ModelKind.DICTATION}
+
+    @pytest.mark.parametrize("kind", ["openrouter", "nanogpt"])
+    def test_a_dictation_list_that_does_not_answer_costs_its_rows_alone(
+        self, server: ModelServer, kind: str
+    ) -> None:
+        server.models = ["chat"]
+        server.dictation_models = None
+        rows = ALL_CLIENTS[kind](_config(server, kind, api_key="k")).models.list()
+        assert [(r.name, r.kinds) for r in rows] == [("chat", {ModelKind.COMPLETION})]
+
+    def test_a_recording_goes_up_as_a_form_and_its_text_comes_back(
+        self, server: ModelServer
+    ) -> None:
+        server.transcript = "  hello there \n"
+        audio = b"RIFF\x00\x00\x00\x00WAVEfmt "
+        text = GenericClient(_config(server, "generic")).dictation.transcribe(
+            "whisper", audio, "wav"
+        )
+        assert text == "hello there"
+        assert server.posts[-1] == "/v1/audio/transcriptions"
+        (upload,) = server.uploads
+        assert upload["fields"] == {"model": "whisper"}
+        assert upload["file"] == {"name": "dictation.wav", "type": "audio/wav", "data": audio}
+
+    def test_an_answer_without_its_text_is_refused(self, server: ModelServer) -> None:
+        server.transcript = None
+        client = GenericClient(_config(server, "generic"))
+        with pytest.raises(ProviderError, match="carries no text"):
+            client.dictation.transcribe("whisper", b"RIFF", "wav")
+
+
 class TestTokenCounts:
     def test_llamacpp_counts_the_chat_body_and_a_raw_prompt(self, server: ModelServer) -> None:
         server.token_count = 42
@@ -2253,7 +2365,7 @@ def _panel_walk(app: App, provider: str, attr: str) -> str:
 
 
 def _unsealed(app: App, value: str) -> str:
-    """A sealed providers.toml value opened over the state dir's file
+    """A sealed providers.toml value opened over the home folder's file
     key — the way the launch opens it."""
     return unseal(value, key_file=app.paths.config_key_file, service="scenario:none")
 

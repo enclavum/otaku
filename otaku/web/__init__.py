@@ -13,7 +13,7 @@ page and its modules beside it.
 frontend's whole life over it — as `terminal.run.run` is the terminal's;
 `web.run_beside` serves an app the terminal holds, beside its chat
 (`/set serve`). What this package reads
-of the state dir is its own medium and nothing else: where to listen
+of the home folder is its own medium and nothing else: where to listen
 (the `[web]` slice in force, `api.settings.web`) and the reader's own
 `web/` directory.
 

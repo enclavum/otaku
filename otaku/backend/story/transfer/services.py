@@ -2,19 +2,17 @@
 into a fresh story, then starts the extraction exactly like a forced
 close — one path builds the memory whether the messages came from play
 or from a file; an export renders the one Markdown document. The
-document and its parsers live in `backend.formats`."""
+document and its parsers live in `backend.formats.stories`."""
 
 import re
 from datetime import datetime
-from pathlib import PurePath
 
 from otaku import __version__
 from otaku.backend.app.core.services import App
 from otaku.backend.errors import NO_SUCH_STORY, Conflict, Invalid, NotFound, Refused
-from otaku.backend.formats import EXPORT_FORMAT_VERSION, EXPORT_MARKER, exports, imports
-from otaku.backend.formats.plaintext import parse_plaintext
-from otaku.backend.formats.sillytavern import parse_sillytavern
+from otaku.backend.formats.stories import EXPORT_FORMAT_VERSION, exports, imports
 from otaku.backend.story.lore import services as lore
+from otaku.settings.state import ModelRole
 
 # What an export is: one Markdown document. A frontend that lets the user
 # name the file supplies this where the name carries no extension of its
@@ -24,47 +22,42 @@ EXPORT_SUFFIX = ".md"
 # An export of a story with nothing played — no story at all included.
 NOTHING_TO_EXPORT = "Nothing to export yet."
 
+# A file its format claims but its reader finds no story in, by its format.
+_UNREADABLE: dict[imports.StoryFileKind, str] = {
+    "document": "This looks like an otaku export, but it does not parse.",
+    "sillytavern": "This looks like JSON, but not a SillyTavern chat (.jsonl).",
+    "plaintext": "The file contains no text to import.",
+}
+
 
 def import_story(
     app: App, text: str, file_name: str
 ) -> tuple[int, list[str], lore.ExtractionState | None]:
-    """Import a story from a file's TEXT and NAME: an otaku export
-    document (.md, its memory applied verbatim, no model calls), a
-    SillyTavern chat (.jsonl), or plain text (.txt) dismantled into
-    verbatim messages. The format is detected — never declared — and the
-    file's name and contents must agree; a file that matches a format
-    but fails its parser is refused, not degraded into prose.
+    """Import a story from a file's TEXT and NAME, read by the format they
+    agree on (`formats.stories.imports.read_story_file`): an otaku export
+    document, its memory applied verbatim with no model calls, a
+    SillyTavern chat, or plain text dismantled into verbatim messages.
     Content-shaped on purpose: reading a path is the frontend's, the web
     uploads. Writes a fresh story, and answers it with the notices to
     show (counts, detected format) and the forced pass to wait on — a
     native export arrives with its memory and runs none. Raises Refused
-    with the exact reason (unknown format, a newer export — run `otaku
-    update`)."""
-    suffix = PurePath(file_name).suffix.lower()
+    with the exact reason (unknown format, a file its format's reader
+    cannot read, a newer export — run `otaku update`)."""
     notices: list[str] = []
-    native = False
-    if suffix == ".md" and EXPORT_MARKER in text:
-        try:
-            export = imports.parse_story(text)
-        except imports.NewerFormatError as e:
-            raise Invalid(
-                f"This export was written by a newer otaku (format {e.declared}; this version "
-                f"reads up to {EXPORT_FORMAT_VERSION}) — run 'otaku update' first."
-            ) from e
-        if export is None:
-            raise Invalid("This looks like an otaku export, but it does not parse.")
-        native = True
-    elif suffix == ".jsonl" and text.lstrip().startswith("{"):
-        export = parse_sillytavern(text)
-        if export is None:
-            raise Invalid("This looks like JSON, but not a SillyTavern chat (.jsonl).")
+    try:
+        export, kind = imports.read_story_file(text, file_name)
+    except imports.NewerFormatError as e:
+        raise Invalid(
+            f"This export was written by a newer otaku (format {e.declared}; this version "
+            f"reads up to {EXPORT_FORMAT_VERSION}) — run 'otaku update' first."
+        ) from e
+    except imports.UnknownFormatError:
+        raise Invalid("Cannot detect file format.") from None
+    except imports.UnreadableFileError as e:
+        raise Invalid(_UNREADABLE[e.kind]) from None
+    native = kind == "document"
+    if kind == "sillytavern":
         notices.append(f"SillyTavern chat: {len(export.messages)} message(s).")
-    elif suffix == ".txt":
-        export = parse_plaintext(text)
-        if export is None:
-            raise Invalid("The file contains no text to import.")
-    else:
-        raise Invalid("Cannot detect file format.")
     if not export.messages:
         raise Invalid("The file contains no messages to import.")
 
@@ -104,7 +97,7 @@ def export_story(app: App, story_id: int) -> tuple[str, str]:
     text = exports.render_story(
         exports.read_story(app._store, story_id),
         otaku_version=__version__,
-        model=model.spec if (model := app._model()) is not None else "",
+        model=model.spec if (model := app._model(ModelRole.WRITING)) is not None else "",
         exported=datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
     )
     stem = re.sub(r"[^\w\s-]", "", story.title.lower())

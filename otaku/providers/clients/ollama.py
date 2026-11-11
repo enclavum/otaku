@@ -32,6 +32,7 @@ from otaku.providers.openai.models import (
     Locality,
     ModelCapabilities,
     ModelInfo,
+    ModelKind,
     ModelState,
     OpenAIModels,
 )
@@ -42,6 +43,10 @@ _UNLOAD_POLL_SECONDS = 0.25
 
 
 class OllamaModels(OpenAIModels):
+    # Its transcription endpoint is a chat with the model, so a model
+    # that takes audio takes dictation.
+    dictation_models_separated = False
+
     def __init__(self, config: ProviderConfig, auth: OpenAIAuth, http: Http) -> None:
         super().__init__(config, auth, http)
         self._remote: set[str] = set()  # served by ollama.com, as of the last listing
@@ -82,8 +87,10 @@ class OllamaModels(OpenAIModels):
         but not the card's (a server here said of Gemma 4 "completion,
         tools, thinking" where the card adds vision), so only what an
         entry cannot get wrong is read off it: an embedding model has
-        no "completion" and plays no story, wherever it is served; and
-        `details.context_length` is the trained length, which a recent
+        no "completion" and plays no story, wherever it is served; one
+        naming "audio" takes dictation (a projector's audio is the
+        card's to add); and `details.context_length` is the trained
+        length, which a recent
         pull records and an older one leaves for the card to say. A
         model with a `remote_host` is ollama.com's: no runner ever lists
         it, its card is an internet round-trip, so the entry's own word
@@ -96,6 +103,7 @@ class OllamaModels(OpenAIModels):
         sizes: dict[str, int | None] = {}
         contexts: dict[str, int | None] = {}
         remote: dict[str, ModelInfo] = {}
+        kinds: dict[str, frozenset[ModelKind]] = {}
         entries = data.get("models") if isinstance(data, dict) else None
         for entry in entries if isinstance(entries, list) else []:
             name = entry.get("name") or entry.get("model")
@@ -123,6 +131,8 @@ class OllamaModels(OpenAIModels):
                 continue
             sizes[name] = positive_int(entry.get("size"))
             contexts[name] = context
+            if isinstance(caps, list) and "audio" in caps:
+                kinds[name] = frozenset({ModelKind.COMPLETION, ModelKind.DICTATION})
         self._remote = set(remote)
         running = self._running(http)
         names = sorted(sizes) + sorted(set(running or {}) - seen)
@@ -133,6 +143,7 @@ class OllamaModels(OpenAIModels):
                 context_length=contexts.get(name),
                 context_loaded=running.get(name) if running else None,
                 state=self._state_of(running, name),
+                kinds=kinds.get(name, frozenset()),
             )
             for name in names
         ]

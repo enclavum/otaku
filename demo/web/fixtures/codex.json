@@ -10,10 +10,13 @@
      "file": "crd-0001-20260101-8aeeff74.jpg",
      "width": 768,
      "height": 1024,
-     "size": 133429
+     "size": 133429,
+     "kind": "portrait",
+     "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 2,
@@ -27,10 +30,13 @@
      "file": "crd-0002-20260101-3c1e7abb.jpg",
      "width": 768,
      "height": 1024,
-     "size": 125673
+     "size": 125673,
+     "kind": "portrait",
+     "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 3,
@@ -46,10 +52,13 @@
      "file": "crd-0003-20260101-19ab7992.jpg",
      "width": 768,
      "height": 1024,
-     "size": 55892
+     "size": 55892,
+     "kind": "portrait",
+     "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 4,
@@ -61,10 +70,13 @@
      "file": "crd-0004-20260101-7ef6e873.jpg",
      "width": 768,
      "height": 1024,
-     "size": 32761
+     "size": 32761,
+     "kind": "portrait",
+     "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 5,
@@ -76,10 +88,13 @@
      "file": "crd-0005-20260101-65648033.jpg",
      "width": 768,
      "height": 1024,
-     "size": 63581
+     "size": 63581,
+     "kind": "portrait",
+     "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 6,
@@ -91,10 +106,13 @@
      "file": "crd-0006-20260101-7e5d102d.jpg",
      "width": 768,
      "height": 1024,
-     "size": 50200
+     "size": 50200,
+     "kind": "portrait",
+     "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 7,
@@ -106,10 +124,13 @@
      "file": "crd-0007-20260101-721daf50.jpg",
      "width": 768,
      "height": 1024,
-     "size": 122703
+     "size": 122703,
+     "kind": "portrait",
+     "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   }
  ],
  "card": {
@@ -137,7 +158,9 @@
      "file": "crd-0001-20260101-8aeeff74.jpg",
      "width": 768,
      "height": 1024,
-     "size": 133429
+     "size": 133429,
+     "kind": "portrait",
+     "name": ""
     }
    ],
    "stories": [
@@ -150,6 +173,14 @@
      "journal_count": 2
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "2": {
@@ -178,7 +209,9 @@
      "file": "crd-0002-20260101-3c1e7abb.jpg",
      "width": 768,
      "height": 1024,
-     "size": 125673
+     "size": 125673,
+     "kind": "portrait",
+     "name": ""
     }
    ],
    "stories": [
@@ -193,6 +226,14 @@
      "journal_count": 2
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "3": {
@@ -223,7 +264,9 @@
      "file": "crd-0003-20260101-19ab7992.jpg",
      "width": 768,
      "height": 1024,
-     "size": 55892
+     "size": 55892,
+     "kind": "portrait",
+     "name": ""
     }
    ],
    "stories": [
@@ -240,6 +283,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "4": {
@@ -266,7 +317,9 @@
      "file": "crd-0004-20260101-7ef6e873.jpg",
      "width": 768,
      "height": 1024,
-     "size": 32761
+     "size": 32761,
+     "kind": "portrait",
+     "name": ""
     }
    ],
    "stories": [
@@ -279,6 +332,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "5": {
@@ -305,7 +366,9 @@
      "file": "crd-0005-20260101-65648033.jpg",
      "width": 768,
      "height": 1024,
-     "size": 63581
+     "size": 63581,
+     "kind": "portrait",
+     "name": ""
     }
    ],
    "stories": [
@@ -318,6 +381,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "6": {
@@ -344,7 +415,9 @@
      "file": "crd-0006-20260101-7e5d102d.jpg",
      "width": 768,
      "height": 1024,
-     "size": 50200
+     "size": 50200,
+     "kind": "portrait",
+     "name": ""
     }
    ],
    "stories": [
@@ -357,6 +430,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "7": {
@@ -383,7 +464,9 @@
      "file": "crd-0007-20260101-721daf50.jpg",
      "width": 768,
      "height": 1024,
-     "size": 122703
+     "size": 122703,
+     "kind": "portrait",
+     "name": ""
     }
    ],
    "stories": [
@@ -396,6 +479,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   }
  },

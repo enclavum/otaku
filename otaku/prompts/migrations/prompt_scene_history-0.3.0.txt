@@ -1,0 +1,8 @@
+Combine the scene summaries below into one running "story so far" summary
+(4-8 sentences, chronological, no headings). Output the summary only.
+
+Write it in the SAME LANGUAGE as the summaries below — do not translate it,
+and do not answer in English because these instructions are in English.
+
+{summaries}
+

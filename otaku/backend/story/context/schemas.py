@@ -19,7 +19,7 @@ from otaku.context.prompt import (
     Provenance,
 )
 from otaku.formatting import format_context
-from otaku.store.schema import InjectionPosition
+from otaku.store.story import InjectionPosition
 
 
 class ContextReport(Report):

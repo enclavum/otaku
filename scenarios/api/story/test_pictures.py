@@ -10,6 +10,7 @@ import pytest
 
 from otaku.backend.api import (
     ModelRef,
+    ModelRole,
     Refused,
 )
 from otaku.backend.story.messages.schemas import RawFile
@@ -38,7 +39,7 @@ class TestPictures:
             assert turn.body == "What is this?"
             assert picture.file.endswith(".jpg")
             assert max(picture.width, picture.height) <= 1568
-            assert app.store.files.get(picture.file) is not None
+            assert app.store.files.get_picture(picture.file) is not None
             assert app.store.files.get_thumb(picture.file) is not None
 
     def test_every_verbatim_turn_keeps_its_picture_on_the_wire(self, tmp_path) -> None:
@@ -142,7 +143,7 @@ class TestPictures:
     def test_a_model_that_cannot_see_gets_none_of_the_storys_pictures(self, tmp_path) -> None:
         with _seeing(tmp_path) as app:
             _play(app, "What is this?", [_cat()])
-            app.api.app.update(model=ModelRef("generic", "test-model"))
+            app.api.app.update(models={ModelRole.WRITING: ModelRef("generic", "test-model")})
             app.play("And now?")
             messages = app.server.requests[-1]["messages"]
             assert all(isinstance(message["content"], str) for message in messages)
@@ -155,11 +156,16 @@ class TestCardPortrait:
 
     def test_the_portrait_reaches_a_model_that_sees(self, tmp_path) -> None:
         with _seeing(tmp_path) as app:
-            card = app.api.cards.create(name="Mira").value
+            card = app.api.cards.create(name="Mira", description="A thief.").value
             app.api.cards.pictures.create(card.id, file=_cat())
             story = app.ensure_story()
             app.api.stories.cards.create(
-                story, card_id=card.id, persona="you", with_pictures=True, expected_head=None
+                story,
+                card_id=card.id,
+                name=card.name,
+                persona="you",
+                with_pictures=True,
+                expected_head=None,
             )
             app.play("Who is she?")
             sent = [

@@ -3,10 +3,10 @@ terminal would show, frame by frame — for the stories whose subject is the
 screen itself, where `Terminal.expect` over the stripped transcript cannot
 tell a row erased from a row left behind.
 
-The model is the test model's (`scripts/test_model.py`): a line's leading
+The model is the mock model's (`scripts/mock_model.py`): a line's leading
 digits choose the reply's blocks — thinking, a note, a question, the two
 tools, a long reply — so every block can be played; `-1` fails every time
-here, where the test model fails half the time. Two readings judge a
+here, where the mock model fails half the time. Two readings judge a
 screen: `mismatch`, the live screen against what a FRESH LAUNCH echoes of
 the same story (`echo`), and `jumps`, the rows above the line being
 written that changed while a reply streamed.
@@ -28,7 +28,7 @@ from typing import Any
 import pyte
 
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, Layout, ModelRef
+from otaku.backend.api import Api, Layout, ModelRef, ModelRole
 from scenarios.support.harness import set_config_provider
 from scenarios.support.server import ModelServer
 from scenarios.support.terminal import Terminal
@@ -50,16 +50,16 @@ _CPR = b"\x1b[6n"
 _ROOT = Path(__file__).resolve().parents[2]
 
 
-def load_test_model() -> ModuleType:
-    """`scripts/test_model.py`, loaded by path: a script, not a package."""
-    spec = importlib.util.spec_from_file_location("test_model", _ROOT / "scripts" / "test_model.py")
+def load_mock_model() -> ModuleType:
+    """`scripts/mock_model.py`, loaded by path: a script, not a package."""
+    spec = importlib.util.spec_from_file_location("mock_model", _ROOT / "scripts" / "mock_model.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-TM = load_test_model()
+MOCK = load_mock_model()
 
 
 class XtermScreen(pyte.Screen):
@@ -177,11 +177,11 @@ class Emulated(Terminal):
 def model_server() -> ModelServer:
     """The test model on the scripted server: both models, their windows
     known, its replies, `-1` refused."""
-    server = ModelServer(models=(TM.CHAT_MODEL, TM.TEXT_MODEL))
+    server = ModelServer(models=(MOCK.CHAT_MODEL, MOCK.TEXT_MODEL))
     server.router = True
-    server.loaded = {TM.CHAT_MODEL, TM.TEXT_MODEL}
-    server.window = TM.WINDOW
-    server.contexts.update({TM.CHAT_MODEL: TM.WINDOW, TM.TEXT_MODEL: TM.WINDOW})
+    server.loaded = {MOCK.CHAT_MODEL, MOCK.TEXT_MODEL}
+    server.window = MOCK.WINDOW
+    server.contexts.update({MOCK.CHAT_MODEL: MOCK.WINDOW, MOCK.TEXT_MODEL: MOCK.WINDOW})
     server.template_reads = set()
     server.chunk_size = 6
     server.chunk_delay = 0.01
@@ -195,7 +195,7 @@ def _short_thinking(body: dict[str, Any]) -> str | tuple[str, str]:
     folded thinking prints nothing while it lasts, and a check waits for
     the screen's silence (`Emulated.quiet`): a thought of seconds would be
     judged halfway."""
-    result = TM.reply(body)
+    result = MOCK.reply(body)
     if isinstance(result, tuple):
         thought, text = result
         return thought.split(". ")[0] + ".", text
@@ -206,7 +206,7 @@ def _refuse(body: dict[str, Any]) -> int | None:
     """500 for a line whose number is -1 — every time."""
     messages = body.get("messages") or []
     last = messages[-1] if messages else {}
-    line = TM.content_text(last) if last.get("role") == "user" else ""
+    line = MOCK.content_text(last) if last.get("role") == "user" else ""
     return 500 if line.rstrip().rsplit("\n\n", 1)[-1].lstrip().startswith("-1") else None
 
 
@@ -226,7 +226,7 @@ def story(
     app = backend_launch.open_app(root)
     try:
         api = Api(app)
-        api.app.update(model=ModelRef("llamacpp", TM.CHAT_MODEL))
+        api.app.update(models={ModelRole.WRITING: ModelRef("llamacpp", MOCK.CHAT_MODEL)})
         story_id = api.stories.create().value.id
         api.stories.settings.update(story_id, "layout", layout=layout)
         api.settings.update(last_story=story_id)
@@ -320,7 +320,7 @@ def _stored_rows(lines: list[str], cursor_row: int) -> tuple[list[str], int]:
         thinking = line.startswith("│") and (
             dropping
             or line.startswith(("│ Thinking…", "│ Thought for "))
-            or (len(line) > 6 and any(line[2:32] in t for t in TM.THOUGHTS))
+            or (len(line) > 6 and any(line[2:32] in t for t in MOCK.THOUGHTS))
         )
         unstored = thinking or line.startswith(("[ error:", "[ total"))
         if unstored or (dropping and not line.strip()):

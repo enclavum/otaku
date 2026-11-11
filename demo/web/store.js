@@ -75,7 +75,7 @@ const state = {
   nextLore: 1, // scenes, characters and journals alike: a demo's ids need not be the store's
   defaults: [], // the settings a story made now starts with
   model: MODELS[0].name,
-  pinned: null, // the model lore extraction is pinned to; null follows the one above
+  pinned: null, // the model lore extraction is pinned to; null asks the one above
   loaded: new Set([MODELS[0].name]),
   launch_facts: { notices: [], hint: "", newer_version: "" },
   version: "",
@@ -310,25 +310,31 @@ export function app() {
       can_complete_text: false,
       can_attach: MODEL_CAPABILITIES.vision,
     },
-    extraction_model: {
-      provider: PROVIDER,
-      name: extracting,
-      listed_name: extracting,
-      pinned: state.pinned !== null,
+    // the demo serves no dictation model, so dictation has none
+    models: {
+      writing: { provider: PROVIDER, name: model.name, listed_name: model.name },
+      extraction: { provider: PROVIDER, name: extracting, listed_name: extracting },
     },
     on_cloud: false,
   };
 }
 
-/* The model in use and the one lore extraction is pinned to — the
-   product's sentences (`app.providers.services`), its refusals. */
-export function updateApp({ model, extraction_model: pin } = {}) {
+/* The model in use and the one each role is pinned to — the product's
+   sentences (`app.providers.services`), its refusals; an extraction model
+   that is the one played with is not kept apart (`settings.state.save`).
+   Every model here is a chat model, so a dictation pin is refused as the
+   product refuses one of the wrong kind. */
+export function updateApp({ models: pins = {} } = {}) {
+  const model = pins.writing;
+  const pin = pins.extraction;
   const said = [];
+  if (model === null) throw invalid("A story always has a model: choose another one instead.");
   if (model !== undefined) {
     const wanted = knownModel(model);
     if (wanted === state.model) said.push(`Already using ${PROVIDER}/${wanted}.`);
     else {
       state.model = wanted;
+      if (state.pinned === wanted) state.pinned = null;
       said.push(`Switched to ${PROVIDER}/${wanted}.`);
     }
   }
@@ -341,15 +347,26 @@ export function updateApp({ model, extraction_model: pin } = {}) {
       }
     } else {
       const wanted = knownModel(pin);
-      if (state.pinned === wanted) said.push(`Lore extraction already uses ${PROVIDER}/${wanted}.`);
-      else {
-        state.pinned = wanted;
+      if ((state.pinned ?? state.model) === wanted) {
+        said.push(`Lore extraction already uses ${PROVIDER}/${wanted}.`);
+      } else {
+        state.pinned = wanted === state.model ? null : wanted;
         said.push(`Lore extraction uses ${PROVIDER}/${wanted}.`);
       }
     }
   }
+  if (pins.dictation !== undefined) {
+    if (pins.dictation === null) said.push("No dictation model is set.");
+    else throw invalid(`${PROVIDER}/${knownModel(pins.dictation)} does not take dictation.`);
+  }
   if (!said.length) throw invalid("Nothing to change.");
   return { value: app(), notice: said.join(" ") };
+}
+
+/* A recording written down, or the check before one: the product's
+   answer with no model saved for dictation, which the demo never has. */
+export function dictate() {
+  throw conflict("Choose a dictation model in /model first.");
 }
 
 function knownModel({ provider, name }) {
@@ -489,6 +506,19 @@ function savePrompt(prompt, text, shipped) {
 
 // ---------- integrations ----------
 
+/* The sites a card is fetched from by a link, as the product answers them
+   (`integrations.cards.Cards.sites`), copied: the demo fetches none. */
+export function cardSites() {
+  return [
+    { name: "Character Tavern", hosts: ["character-tavern.com"] },
+    { name: "Chub", hosts: ["chub.ai", "characterhub.org", "venus.chub.ai"] },
+    { name: "Civitai", hosts: ["civitai.com", "civitai.red"] },
+    { name: "Pygmalion", hosts: ["pygmalion.chat"] },
+    { name: "RisuRealm", hosts: ["realm.risuai.net"] },
+    { name: "Wyvern", hosts: ["wyvern.chat", "app.wyvern.chat"] },
+  ];
+}
+
 export function webSearch() {
   return { has_key: false };
 }
@@ -583,6 +613,7 @@ export function models(providerName) {
     text_template: null,
     reasoning_words: "not supported",
     capability_words: "none",
+    kinds: ["completion"],
   }));
 }
 
@@ -694,7 +725,7 @@ export function info(storyId = null) {
   rows.push(["Extraction", state.pinned ? `${PROVIDER}/${state.pinned}` : "the story model"]);
   return {
     sections: [
-      { rows: [["State dir", "(this browser tab — nothing leaves it)"]], note: "" },
+      { rows: [["Home folder", "(this browser tab — nothing leaves it)"]], note: "" },
       {
         rows: [
           ["Backend", "demo (a model that lives in the page)"],
@@ -778,6 +809,7 @@ export function createStory({ title = "", premise = "", cards = [], persona = ""
   if (new Set(cards.map((card) => card.id)).size !== cards.length) throw invalid("A card is picked twice.");
   const seen = new Set();
   for (const card of cards) {
+    if (isEmpty(card)) throw conflict(`${card.name} card is empty, cannot start a story with it.`);
     if (seen.has(card.name.toLowerCase())) {
       throw conflict(`Two of the cards are called ${card.name} — rename one first.`);
     }
@@ -1178,7 +1210,8 @@ function sendPortrait(story, row, sent) {
   if (sent && !row.card_portrait) throw invalid(`${row.name}'s card has no picture to send.`);
   for (const typed of story.messages) {
     if (typed.kind === "card" && typed.speaker === row.name) {
-      typed.attachments = sent ? [structuredClone(row.card_portrait)] : [];
+      // the portrait as a turn's picture: its file and measure (`Attachment.of`)
+      typed.attachments = sent ? [attachmentOf(row.card_portrait)] : [];
     }
   }
   row.portrait_sent = sent;
@@ -1249,6 +1282,10 @@ function showCard(row, card) {
 
 function portraitOf(card) {
   return card?.pictures.length ? structuredClone(card.pictures[0]) : null;
+}
+
+function attachmentOf({ file, width, height, size }) {
+  return { file, width, height, size };
 }
 
 /* The card a link joins, refused as `story.lore.services._linkable` says. */
@@ -1490,7 +1527,7 @@ export function profileToml(card, user) {
 
 // ---------- the codex ----------
 
-/* All characters, as `backend.codex.cards.services` keeps them: the cards,
+/* Characters, as `backend.codex.cards.services` keeps them: the cards,
    the stories each is in read off the casts as the store reads them, the
    digest of each card file a card was made from, and the stories'
    characters no card claims. A picture added to a card is not kept: the
@@ -1531,7 +1568,36 @@ function storyCharacter(story, row) {
   };
 }
 
-const cardOf = (card) => ({ ...structuredClone(card), stories: linkedTo(card.id) });
+const cardOf = (card) => ({
+  ...structuredClone(card),
+  stories: linkedTo(card.id),
+  is_blank: isBlank(card),
+  // the demo keeps no card's file: a card is PNG with a portrait, else
+  // JSON (`codex.cards.services.default_export_format`)
+  default_export_format: card.pictures.length ? "png" : "json",
+  available_export_formats: [...(card.pictures.length ? ["png"] : []), "json", "charx"],
+  original_format: null,
+});
+
+/** Whether a card holds no text a story could take
+    (`codex.cards.services.is_blank`): every field the reader writes empty,
+    the reminder's depth aside. */
+export function isBlank(card) {
+  return CARD_FIELDS.filter((key) => key !== "reminder_depth").every((key) => !card[key]?.length);
+}
+
+/** Whether a card gives a story nothing but its name: no text yet and no
+    picture (`story.cards.services._is_playable`). */
+function isEmpty(card, hasPicture = card.pictures.length > 0) {
+  return isBlank(card) && !hasPicture;
+}
+
+/** Refused where the card gives a story nothing but its name, as a story's
+    doors refuse it (`story.cards.services._ensure_written`); `hasPicture`
+    for a card read from a file, which keeps its picture apart. */
+export function ensureWritten(card, hasPicture = card.pictures.length > 0) {
+  if (isEmpty(card, hasPicture)) throw conflict(`${card.name} has no text yet.`);
+}
 
 export function cardSummary(card) {
   return {
@@ -1541,6 +1607,7 @@ export function cardSummary(card) {
     tagline: card.tagline,
     pictures: structuredClone(card.pictures),
     story_count: linkedTo(card.id).length,
+    is_blank: isBlank(card),
   };
 }
 
@@ -1608,7 +1675,7 @@ const NEW_CARD_NAME = "New card";
 export function createCard({ name = NEW_CARD_NAME, aliases = [], tagline = "", fields = {} }) {
   checkDepth(fields);
   const made = makeCard({ name: cleanName(name), aliases, tagline: cleanTagline(tagline), fields });
-  return { value: cardOf(made), notice: `Added ${made.name} to the codex.` };
+  return { value: cardOf(made), notice: `Added ${made.name} to Characters.` };
 }
 
 /* The interface's correction: the parts given, then a move where one is
@@ -1676,7 +1743,7 @@ export function deleteCard(id) {
   }
   state.cards.delete(id);
   state.cardDigests.delete(id);
-  let said = `Deleted ${card.name} from the codex.`;
+  let said = `Deleted ${card.name} from Characters.`;
   if (stories) said += ` Its characters in ${stories} ${stories === 1 ? "story" : "stories"} stay, unlinked.`;
   return { value: null, notice: said };
 }
@@ -1753,7 +1820,7 @@ export function promote(storyId, characterId, { withCopies = false } = {}) {
   linkRows([row, ...found.map(copyRow)], made);
   return {
     value: cardOf(made),
-    notice: `Added ${row.name} to the codex, linked to this story's character.${linkedCopies(found.length)}`,
+    notice: `Added ${row.name} to Characters, linked to this story's character.${linkedCopies(found.length)}`,
   };
 }
 
@@ -1766,7 +1833,7 @@ function promotable(storyId, characterId) {
   const row = held(storyId).lore.characters.find((each) => each.id === characterId);
   if (!row) throw notFound("That character is not in this story's memory.");
   if (row.card_id != null) {
-    throw conflict(`This character is linked to ${cardRow(row.card_id).name} in the codex already.`);
+    throw conflict(`This character is linked to ${cardRow(row.card_id).name} in Characters already.`);
   }
   return row;
 }
@@ -1794,30 +1861,91 @@ export function checkCardFile(found, notes, hasPicture, rename = "") {
     name: named,
     notes,
     has_picture: hasPicture,
+    // the demo keeps no picture, so it draws no thumbnail of one
+    thumbnail: null,
     same_card: same ? cardSummary(same) : null,
     similar_cards: similar.map(cardSummary),
+    similar_note: "",
   };
+}
+
+/** What a card file the codex imports says of the cards alike, as
+    `codex.cards.services.similar_note` says it — the demo's alike by name
+    alone, keeping no picture to match; "" for none. */
+export function similarNote(checked) {
+  const cards = checked.similar_cards;
+  if (!cards.length) return "";
+  const many = cards.length > 1;
+  const named = cards.map((card) => `${card.name} (same name)`).join(", ");
+  return `Characters has ${many ? "cards" : "a card"} like this: ${named}. It will be added beside ${many ? "them" : "it"}.`;
+}
+
+/** A picture that holds no card, read for the codex (`CardCheck`): the
+    blank card it would make, as `codex.cards.services.check_card_file`
+    answers. */
+export function checkPicture(rename = "") {
+  return {
+    name: rename.trim() ? cleanName(rename) : NEW_CARD_NAME,
+    notes: ["Picture only, without a card."],
+    has_picture: true,
+    thumbnail: null,
+    same_card: null,
+    similar_note: "",
+    similar_cards: [],
+  };
+}
+
+/** A picture that holds no card into the codex: the demo keeps no
+    picture, so it makes no card of one. */
+export function importPicture() {
+  throw conflict(NOT_IN_DEMO("A card made from a picture"));
+}
+
+/** A card fetched from a link (`fetch_card`): the demo asks no
+    site. */
+/** A card as a file (`export_card`): the demo writes no card file. */
+export function exportCard(id) {
+  cardRow(id);
+  throw conflict(NOT_IN_DEMO("Exporting a card"));
+}
+
+export function fetchCard() {
+  throw conflict(NOT_IN_DEMO("A card from a link"));
+}
+
+/** A card written from its pictures (`generate_card`): the demo's model
+    sees none, so it is refused as the product refuses such a model. */
+export function generateCard(id) {
+  cardRow(id);
+  throw conflict("The model in use cannot see pictures.");
+}
+
+/** A card's generation given up (`cancel_generation`): none ever runs
+    in the demo. */
+export function cancelGeneration(id) {
+  cardRow(id);
+  throw conflict("No generation is running.");
 }
 
 /** A card file into the codex (`CardImport`): one the codex holds already
     makes nothing, `reuse` names the card the reader says it is; else a
     card is made — its picture, where the file has one, not in the demo. */
-export function importCardFile(found, notes, hasPicture, { rename = "", reuse = null } = {}) {
+export function importCardFile(found, notes, hasPicture, { name = null, reuse = null, tagline = "" } = {}) {
   const digest = digestOf(found);
   const same = sameCard(found);
-  if (same) return { value: { card: cardOf(same), made: false }, notice: `${same.name} is in the codex already.` };
+  if (same) return { value: { card: cardOf(same), made: false }, notice: `${same.name} is in Characters already.` };
   if (reuse !== null) {
     const kept = cardRow(reuse);
     state.cardDigests.set(kept.id, [...(state.cardDigests.get(kept.id) ?? []), digest]);
-    return { value: { card: cardOf(kept), made: false }, notice: `Kept ${kept.name}: the codex holds it already.` };
+    return { value: { card: cardOf(kept), made: false }, notice: `Kept ${kept.name}: Characters has it already.` };
   }
-  const name = rename.trim() ? cleanName(rename) : found.name;
-  const made = makeCard({ name, fields: found, fileName: found.file_name ?? "" });
+  // under the name asked, the file's own where none is (a story's import)
+  const named = name === null ? found.name : cleanName(name);
+  const made = makeCard({ name: named, tagline: cleanTagline(tagline), fields: found, fileName: found.file_name ?? "" });
   state.cardDigests.set(made.id, [digest]);
-  const said = [`Added ${name} to the codex`, ...notes];
-  if (hasPicture) said.push(`its picture was not kept: ${NOT_IN_DEMO("A card's picture")}`);
-  const sentence = said.join(" · ");
-  return { value: { card: cardOf(made), made: true }, notice: sentence.endsWith(".") ? sentence : `${sentence}.` };
+  const said = [`Added ${named} to Characters.`, ...notes];
+  if (hasPicture) said.push(`The picture isn't kept. ${NOT_IN_DEMO("A card's picture")}`);
+  return { value: { card: cardOf(made), made: true }, notice: said.join(" ") };
 }
 
 /** The stories' casts show the cards they are linked to (`showCard`): a

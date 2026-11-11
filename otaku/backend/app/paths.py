@@ -1,9 +1,10 @@
-"""Filesystem layout of the state dir — application knowledge, owned by
+"""Filesystem layout of the home folder — application knowledge, owned by
 the composition root. Everything below backend takes plain Path values
 derived here; nothing else knows the tree.
 
 Layout: configs/ holds what the user edits and what the app remembers,
 database/ the story store, its backups and its files folder, logs/ the append-only logs.
+Where the home folder is, `Paths.resolve` decides.
 """
 
 from dataclasses import dataclass
@@ -11,8 +12,11 @@ from pathlib import Path
 from typing import Self
 
 from otaku.settings import SettingsFiles
+from otaku.update import checkout_folder
 
-DEFAULT_ROOT = "~/.otaku"
+# otaku's home folder in the reader's own, and a git checkout's, beside its code.
+_DEFAULT_HOME_FOLDER = "~/.otaku"
+_CHECKOUT_HOME_FOLDER = "data"
 
 
 @dataclass(frozen=True)
@@ -21,12 +25,28 @@ class Paths:
 
     @classmethod
     def resolve(cls, root: str | Path | None = None) -> Self:
-        """The state dir: `root` when given, else the default. The env
-        var belongs to cli, which passes the resolved root in."""
-        return cls(root=Path(root or DEFAULT_ROOT).expanduser())
+        """The home folder: the first of the rules below that holds."""
+        default_home_folder = Path(_DEFAULT_HOME_FOLDER).expanduser()
+        checkout = checkout_folder()
+        checkout_home_folder = checkout / _CHECKOUT_HOME_FOLDER if checkout is not None else None
+        # 1. the one cli names (`OTAKU_HOME` and its kin, entry-point business)
+        if root:
+            return cls(root=Path(root).expanduser())
+        # 2. a git checkout's own, once it has one
+        if checkout_home_folder is not None and checkout_home_folder.is_dir():
+            return cls(root=checkout_home_folder)
+        # 3. ~/.otaku where it exists: every install's, and a checkout's
+        #    from before checkouts kept their own
+        if default_home_folder.exists():
+            return cls(root=default_home_folder)
+        # 4. a git checkout's own, made there
+        if checkout_home_folder is not None:
+            return cls(root=checkout_home_folder)
+        # 5. ~/.otaku
+        return cls(root=default_home_folder)
 
     def ensure_tree(self) -> None:
-        """Create the state dir layout."""
+        """Create the home folder layout."""
         for directory in (self.configs_dir, self.database_dir, self.logs_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -134,7 +154,7 @@ class Paths:
 
     @property
     def keychain_service(self) -> str:
-        """The OS-keychain service label, named per state dir so parallel
+        """The OS-keychain service label, named per home folder so parallel
         setups never share a key."""
         return f"otaku:{self.root}"
 
@@ -145,7 +165,6 @@ class Paths:
             config=self.config_file,
             providers=self.providers_file,
             integrations=self.integrations_file,
-            prompts=self.prompts_file,
             state=self.state_file,
             models=self.models_file,
             backups_dir=self.config_backups_dir,

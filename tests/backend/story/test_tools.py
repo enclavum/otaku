@@ -278,10 +278,11 @@ def _bound(engine: WebSearch) -> Integrations:
 
 def _app(integrations: Integrations, *, model: str = "m") -> App:
     """A stand-in app holding what a tool reads off one: the
-    integrations as bound and the model in use."""
+    integrations as bound and the model each role asks — the model in
+    use alike for every role."""
     return cast(
         App,
-        SimpleNamespace(_integrations=integrations, _model=lambda: ModelRef("p", model)),
+        SimpleNamespace(_integrations=integrations, _model=lambda role: ModelRef("p", model)),
     )
 
 

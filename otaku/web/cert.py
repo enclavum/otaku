@@ -1,6 +1,6 @@
 """The certificate the local server serves under, and the key beside it.
 
-Generated once into the state dir's `cert/` and then left alone: what is
+Generated once into the home folder's `cert/` and then left alone: what is
 there is what is served, so a reader who drops in a pair of their own —
 mkcert, `tailscale cert`, anything a browser already trusts — simply
 replaces these two files and otaku never writes over them.

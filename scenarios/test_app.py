@@ -1,6 +1,7 @@
-"""The launch itself (`otaku.app`): the key ceremony and what it seals,
-the daily backup snapshot, resuming over a story that is gone, and the
-purge that `otaku uninstall` asks for.
+"""The launch itself (`otaku.app`): the home folder it opens, the key
+ceremony and what it seals, the backup snapshots and the logs it prunes,
+what a delete leaves in the database, resuming over a story that is
+gone, and the purge that `otaku uninstall` asks for.
 
 Encryption runs the real path end to end — the "command" KEK provider
 with a scripted retrieve_command — so these stories prove the core
@@ -9,31 +10,36 @@ missing keystore refused BEFORE the ceremony could mint over it."""
 
 import base64
 import itertools
+import json
+import os
 import re
 import secrets
 import sqlite3
 import subprocess
 import sys
+import time
 import tomllib
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from otaku import encryption
+from otaku import encryption, envvars
 from otaku import logging as otaku_logging
+from otaku import prompts as prompts_mod
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, ModelRef
+from otaku.backend.api import Api, ModelRef, ModelRole
+from otaku.backend.app import paths as paths_mod
 from otaku.backend.app.paths import Paths
 from otaku.backend.app.pictures import services as backend_files
 from otaku.backend.story.messages.schemas import RawFile
+from otaku.cli import resolve_root
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
 from otaku.formatting import toml_string
+from otaku.prompts.migrations import PAST
 from otaku.settings import config as config_mod
-from otaku.settings import prompts as prompts_mod
 from otaku.settings import providers as providers_mod
 from otaku.settings.migrations import surgery
-from otaku.settings.migrations.prompt_texts import CARD_FRAMING_0_7_0, EXTRACT_0_2_2
 from otaku.store import DatabaseError, Store, is_encrypted
 from otaku.store import migrations as store_migrations
 from otaku.store.database import Database, check_value
@@ -48,14 +54,10 @@ from otaku.store.migrations import v11 as store_v11
 from otaku.store.migrations import v12 as store_v12
 from otaku.store.migrations import v13 as store_v13
 from otaku.store.migrations import v14 as store_v14
-from otaku.store.schema import (
-    SCHEMA_DDL,
-    SCHEMA_VERSION,
-    Attachment,
-    Message,
-    StoryMode,
-    StorySettingDB,
-)
+from otaku.store.migrations import v15 as store_v15
+from otaku.store.pictures import Attachment, CardPicture, CardPictureKind
+from otaku.store.schema import SCHEMA_DDL, SCHEMA_VERSION, Message
+from otaku.store.story import StoryMode, StorySettingDB
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config, set_config_provider
@@ -81,6 +83,66 @@ def load_config(paths: Paths):
 
 KEY = base64.b64encode(b"k" * 32).decode()
 OTHER_KEY = base64.b64encode(b"x" * 32).decode()
+
+
+class TestHomeFolder:
+    """Where otaku keeps everything: the folder the environment names,
+    the first of `OTAKU_HOME`, `OTAKU_DATA_DIR` and `OTAKU_CONFIG_DIR`
+    set; else a git checkout's own `data/` once it has one, `~/.otaku`
+    where it exists, a checkout's `data/`, and `~/.otaku`."""
+
+    def test_otaku_home_comes_before_the_older_names(self, monkeypatch, tmp_path) -> None:
+        _names_home(
+            monkeypatch,
+            OTAKU_HOME=str(tmp_path / "home"),
+            OTAKU_DATA_DIR=str(tmp_path / "data"),
+            OTAKU_CONFIG_DIR=str(tmp_path / "config"),
+        )
+        assert resolve_root() == tmp_path / "home"
+
+    def test_the_older_names_follow_in_their_order(self, monkeypatch, tmp_path) -> None:
+        _names_home(
+            monkeypatch,
+            OTAKU_HOME="",
+            OTAKU_DATA_DIR=str(tmp_path / "data"),
+            OTAKU_CONFIG_DIR=str(tmp_path / "config"),
+        )
+        assert resolve_root() == tmp_path / "data"
+        _names_home(monkeypatch, OTAKU_CONFIG_DIR=str(tmp_path / "config"))
+        assert resolve_root() == tmp_path / "config"
+
+    def test_none_set_leaves_the_folder_to_the_defaults(self, monkeypatch) -> None:
+        _names_home(monkeypatch)
+        assert resolve_root() is None
+
+    def test_a_named_folder_comes_before_both_defaults(self, monkeypatch, tmp_path) -> None:
+        _machine(monkeypatch, tmp_path, is_checkout=True, own_made=True, default_made=True)
+        assert Paths.resolve(tmp_path / "mine").root == tmp_path / "mine"
+
+    def test_a_checkouts_own_folder_once_it_has_one(self, monkeypatch, tmp_path) -> None:
+        _, own = _machine(monkeypatch, tmp_path, is_checkout=True, own_made=True, default_made=True)
+        assert Paths.resolve().root == own
+
+    def test_an_existing_default_before_a_checkout_without_its_own(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        # A checkout from before checkouts kept their own keeps its data.
+        default, _ = _machine(
+            monkeypatch, tmp_path, is_checkout=True, own_made=False, default_made=True
+        )
+        assert Paths.resolve().root == default
+
+    def test_a_checkout_with_neither_makes_its_own(self, monkeypatch, tmp_path) -> None:
+        _, own = _machine(
+            monkeypatch, tmp_path, is_checkout=True, own_made=False, default_made=False
+        )
+        assert Paths.resolve().root == own
+
+    def test_an_install_takes_the_default(self, monkeypatch, tmp_path) -> None:
+        default, _ = _machine(
+            monkeypatch, tmp_path, is_checkout=False, own_made=False, default_made=False
+        )
+        assert Paths.resolve().root == default
 
 
 class TestEncryption:
@@ -194,6 +256,69 @@ class TestBackups:
         finally:
             relaunched.close()
 
+    def test_the_newest_snapshots_are_kept_the_ladders_among_them(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        # One count for both kinds, by when each was written: today's,
+        # then yesterday's, then a migration's from a day and a half ago.
+        root = tmp_path / "state"
+        launch(root, server).close()
+        backups_dir = Paths.resolve(root).backups_dir
+        planted = _plant_snapshots(backups_dir)
+        set_config(root, backups=4)
+        launch(root, server).close()
+        kept = {_snapshot_name(0), _snapshot_name(1), "history-schema-v14.db", _snapshot_name(2)}
+        assert {path.name for path in backups_dir.iterdir()} == kept | {planted}
+
+    def test_zero_takes_none_and_keeps_none(self, server: ModelServer, tmp_path) -> None:
+        root = tmp_path / "state"
+        launch(root, server).close()
+        backups_dir = Paths.resolve(root).backups_dir
+        planted = _plant_snapshots(backups_dir)
+        set_config(root, backups=0)
+        launch(root, server).close()
+        assert [path.name for path in backups_dir.iterdir()] == [planted]
+
+    def test_an_open_beside_the_launchs_takes_and_prunes_nothing(self, tmp_path) -> None:
+        # The worker's own connection: the snapshots are the launch's.
+        paths = _state(tmp_path)
+        _plant_snapshots(paths.backups_dir)
+        before = sorted(path.name for path in paths.backups_dir.iterdir())
+        _open(paths).close()
+        assert sorted(path.name for path in paths.backups_dir.iterdir()) == before
+
+
+class TestLogs:
+    """The logs keep `[logs] days` of files, today the first, pruned at
+    launch; 0 turns the request and system logs off, and the error log
+    keeps a week of its own."""
+
+    def test_the_days_past_the_kept_are_pruned_at_launch(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        root = tmp_path / "state"
+        launch(root, server).close()
+        set_config(root, log_days=3)
+        logs_dir = Paths.resolve(root).logs_dir
+        _plant_logs(logs_dir, ages=(0, 2, 3, 30))
+        launch(root, server).close()
+        kept = {_day(0), _day(2)}
+        assert _log_days(logs_dir) == {"requests": kept, "system": kept, "error": kept}
+
+    def test_zero_turns_the_request_and_system_logs_off(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        root = tmp_path / "state"
+        launch(root, server).close()
+        set_config(root, log_days=0)
+        logs_dir = Paths.resolve(root).logs_dir
+        _plant_logs(logs_dir, ages=(0, 6, 7))
+        app = launch(root, server)
+        app.play("I enter the hall.")
+        backend_launch.system_log(root).record("app update finished")  # what `otaku update` writes
+        app.close()
+        assert _log_days(logs_dir) == {"error": {_day(0), _day(6)}}
+
 
 class TestRequestLog:
     """The request log pairs every request with its answer: what came
@@ -258,6 +383,87 @@ class TestDatabaseGuard:
         conn.commit()
         conn.close()
         launch(tmp_path / "state", server).close()  # launching IS the assertion
+
+
+class TestDeletedContent:
+    """A delete leaves no trace of what it removed in the database file;
+    a launch rewrites a file a quarter free — what deletes left there
+    before, gone — unless another otaku is writing to it, and says so."""
+
+    def test_a_deleted_storys_text_leaves_the_file(self, app: App) -> None:
+        marker = f"Vermilion-{secrets.token_hex(8)}"
+        app.server.script = lambda body: f"The {marker} " + "lantern light " * 600
+        app.play("I enter the hall.")
+        story_id = app.story_id
+        assert story_id is not None
+        app.api.stories.delete(story_id)
+        app.close()
+        assert marker.encode() not in app.paths.database_file.read_bytes()
+        # SQLite builds differ in what a delete leaves by default: every
+        # connection otaku opens says it itself.
+        conn = Database.connect(app.paths.database_file)
+        try:
+            assert conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
+        finally:
+            conn.close()
+
+    def test_a_launch_rewrites_a_file_a_quarter_free(self, server: ModelServer, tmp_path) -> None:
+        root = tmp_path / "state"
+        launch(root, server).close()
+        database = Paths.resolve(root).database_file
+        marker = _left_by_old_deletes(database, rows=1500)
+        size = database.stat().st_size
+        launch(root, server).close()
+        assert _free_pages(database) == 0
+        assert database.stat().st_size < size
+        assert marker not in database.read_bytes()
+
+    def test_the_rewrite_is_said(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir).close()
+        _left_by_old_deletes(paths.database_file, rows=1500)
+        db = Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir)
+        try:
+            note = db.vacuum()
+        finally:
+            db.close()
+        assert note is not None and note.show
+
+    def test_under_a_quarter_free_nothing_is_rewritten(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir).close()
+        _left_by_old_deletes(paths.database_file, rows=1500, share=0.1)
+        free = _free_pages(paths.database_file)
+        db = Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir)
+        try:
+            assert db.vacuum() is None
+        finally:
+            db.close()
+        assert _free_pages(paths.database_file) == free > 0
+
+    def test_another_otaku_writing_puts_it_off_to_the_next_launch(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir).close()
+        _left_by_old_deletes(paths.database_file, rows=1500)
+        free = _free_pages(paths.database_file)
+        other = sqlite3.connect(paths.database_file, isolation_level=None)
+        db = Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            started = time.monotonic()
+            skipped = db.vacuum()
+            assert time.monotonic() - started < 1  # never waits for the writer
+            assert skipped is not None and not skipped.show  # the log's alone
+            # Later writes still wait for another otaku, as before.
+            assert db.conn.execute("PRAGMA busy_timeout").fetchone()[0] > 0
+            other.execute("COMMIT")
+            assert _free_pages(paths.database_file) == free
+            vacuumed = db.vacuum()
+        finally:
+            db.close()
+            other.close()
+        assert vacuumed is not None and vacuumed.show
+        assert _free_pages(paths.database_file) == 0
 
 
 class TestSchemaMigration:
@@ -488,6 +694,22 @@ class TestSchemaMigration:
         end = shipped.index(");", start) + 1
         assert shipped[start:end] == store_v10._V9_CHARACTERS
 
+    def test_the_frozen_v14_is_what_the_release_shipped(self) -> None:
+        """Step 15's precondition against the schema the v0.9.0 tag shipped
+        (version 14): the cards the original file is appended to."""
+        proc = subprocess.run(
+            ["git", "show", "v0.9.0:otaku/store/schema.py"],
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if proc.returncode != 0:
+            pytest.skip("the v0.9.0 tag is not reachable here")
+        shipped = proc.stdout
+        start = shipped.index("CREATE TABLE cards")
+        end = shipped.index(");", start) + 1
+        assert shipped[start:end] == store_v15._V14_CARDS
+
     def test_the_ladder_resumes_from_where_it_stamped(self, tmp_path, monkeypatch) -> None:
         paths = _v1_database(tmp_path / "state")
         monkeypatch.setitem(store_migrations._STEPS, 3, _raise)
@@ -627,11 +849,9 @@ class TestFilesFolder:
 
     def test_a_picture_lands_sealed_beside_the_database(self, tmp_path) -> None:
         paths = _state(tmp_path)
-        store = Store.open(
-            paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
-        )
+        store = Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir)
         try:
-            name = store.files.add(Owner.STORY, 24, CAT, "image/jpeg", thumb=THUMB)
+            name = store.files.add_picture(Owner.STORY, 24, CAT, "image/jpeg", thumb=THUMB)
             # Readable in a listing: the kind, the story, the day, a short
             # digest of the bytes, the picture's own extension — and the
             # thumbnail beside it.
@@ -640,7 +860,7 @@ class TestFilesFolder:
             assert names == {name, name.removesuffix(".jpg") + "-thumb.jpg"}
             sealed = (paths.database_dir / "files" / name).read_bytes()
             assert CAT not in sealed
-            assert store.files.get(name) == (CAT, "image/jpeg")
+            assert store.files.get_picture(name) == (CAT, "image/jpeg")
             assert store.files.get_thumb(name) == THUMB
         finally:
             store.close()
@@ -649,7 +869,7 @@ class TestFilesFolder:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
-            name = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
+            name = store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg")
             assert (paths.database_dir / "files" / name).read_bytes() == CAT
             assert store.files.get_thumb(name) is None  # none was given
         finally:
@@ -657,25 +877,23 @@ class TestFilesFolder:
 
     def test_another_key_reads_the_folder_as_absent(self, tmp_path) -> None:
         paths = _state(tmp_path)
-        store = Store.open(
-            paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
-        )
+        store = Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir)
         try:
-            name = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
+            name = store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg")
         finally:
             store.close()
         other = FileStore(paths.database_dir / "files", Cipher(FILES_OTHER_KEY))
-        assert other.get(name) is None
+        assert other.get_picture(name) is None
 
     def test_the_same_picture_twice_in_a_story_is_one_file(self, tmp_path) -> None:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
-            first = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
-            assert store.files.add(Owner.STORY, 1, CAT, "image/jpeg") == first
+            first = store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg")
+            assert store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg") == first
             assert len(_files(paths)) == 1
             # Another story's copy is its own file, under its own number.
-            assert store.files.add(Owner.STORY, 2, CAT, "image/jpeg") != first
+            assert store.files.add_picture(Owner.STORY, 2, CAT, "image/jpeg") != first
             assert len(_files(paths)) == 2
         finally:
             store.close()
@@ -722,10 +940,10 @@ class TestFilesFolder:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
-            name = store.files.add(Owner.CARD, 12, CAT, "image/jpeg")
+            name = store.files.add_picture(Owner.CARD, 12, CAT, "image/jpeg")
             assert re.fullmatch(r"crd-0012-\d{8}-[0-9a-f]{8}\.jpg", name)
             # the same bytes for a story are a file of their own
-            assert store.files.add(Owner.STORY, 12, CAT, "image/jpeg") != name
+            assert store.files.add_picture(Owner.STORY, 12, CAT, "image/jpeg") != name
         finally:
             store.close()
 
@@ -734,13 +952,37 @@ class TestFilesFolder:
         store = _open(paths)
         try:
             card = store.cards.add("Mira")
-            name = store.files.add(Owner.CARD, card, CAT, "image/jpeg", thumb=THUMB)
+            name = store.files.add_picture(Owner.CARD, card, CAT, "image/jpeg", thumb=THUMB)
             store.cards.set_pictures(
-                card, [Attachment(file=name, width=2, height=2, size=len(CAT))]
+                card, [CardPicture(file=name, width=2, height=2, size=len(CAT))]
             )
             assert store.sweep_files() == 0
             store.cards.delete(card)
             assert store.sweep_files() == 2  # the picture and its thumbnail
+            assert _files(paths) == []
+        finally:
+            store.close()
+
+    def test_a_card_file_kept_as_it_came_is_marked_and_never_served_as_a_picture(
+        self, tmp_path
+    ) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            card = store.cards.add("Mira")
+            # a PNG card file: the extension a picture's would take, marked
+            name = store.files.add_file(Owner.CARD, card, CAT, "png")
+            assert re.fullmatch(rf"crd-{card:04d}-\d{{8}}-[0-9a-f]{{8}}-orig\.png", name)
+            assert store.files.get_file(name) == CAT
+            assert store.files.get_picture(name) is None
+            # the same bytes as a picture of the card are a file of their own
+            picture = store.files.add_picture(Owner.CARD, card, CAT, "image/png")
+            assert picture != name
+            store.cards.set_original_file(card, name)
+            assert store.sweep_files() == 1  # the picture no row names
+            assert store.files.get_file(name) == CAT
+            store.cards.delete(card)
+            assert store.sweep_files() == 1
             assert _files(paths) == []
         finally:
             store.close()
@@ -752,18 +994,23 @@ class TestFilesFolder:
         store = _open(paths)
         try:
             card = store.cards.add("Mira")
-            name = store.files.add(Owner.CARD, card, CAT, "image/jpeg")
-            portrait = Attachment(file=name, width=2, height=2, size=len(CAT))
+            name = store.files.add_picture(Owner.CARD, card, CAT, "image/jpeg")
+            portrait = CardPicture(file=name, width=2, height=2, size=len(CAT))
             store.cards.set_pictures(card, [portrait])
             story = store.stories.add("Cats")
             store.stories.append(
                 story,
-                Message(role="user", body="/card Mira", kind="card", attachments=(portrait,)),
+                Message(
+                    role="user",
+                    body="/card Mira",
+                    kind="card",
+                    attachments=(Attachment.of(portrait),),
+                ),
                 after=None,
             )
             store.cards.delete(card)
             assert store.sweep_files() == 0
-            assert store.files.get(name) == (CAT, "image/jpeg")
+            assert store.files.get_picture(name) == (CAT, "image/jpeg")
         finally:
             store.close()
 
@@ -832,10 +1079,10 @@ class TestFilesFolder:
         store = _open(paths)
         try:
             read = backend_files.read_picture(RawFile(CAT_PHOTO.read_bytes(), "cat.jpg"))
-            picture = backend_files.save(store.files, read, Owner.STORY, 1)
-            assert picture.file.endswith(".jpg")
+            picture = backend_files.save(store.files, read, 1, Attachment)
+            assert picture.file.startswith("pic-0001-") and picture.file.endswith(".jpg")
             assert max(picture.width, picture.height) <= backend_files.WIRE_EDGE
-            stored = store.files.get(picture.file)
+            stored = store.files.get_picture(picture.file)
             assert stored is not None and len(stored[0]) == picture.size
             assert store.files.get_thumb(picture.file) is not None
             names = {path.name for path in _files(paths)}
@@ -963,6 +1210,25 @@ class TestConfigMigration:
         assert len(backups) == 1
         assert "[terminal]" not in backups[0].read_text(encoding="utf-8")
 
+    def test_an_old_config_gains_the_logs_section_below_database(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        app = launch(tmp_path / "state", server)
+        app.close()
+        config_file = app.paths.config_file
+        old = "\n".join(
+            line
+            for line in config_file.read_text(encoding="utf-8").splitlines()
+            if not line.startswith(("[logs]", "days ="))
+        )
+        config_file.write_text(old + "\n", encoding="utf-8")
+
+        cfg, _providers = load_config(app.paths)
+        migrated = config_file.read_text(encoding="utf-8")
+        index = migrated.index
+        assert index("[database]") < index("[logs]") < index("[encryption]")
+        assert cfg.log_days == 7
+
     def test_an_old_context_section_gains_the_max_context_row(
         self, server: ModelServer, tmp_path
     ) -> None:
@@ -1065,21 +1331,21 @@ class TestConfigMigration:
         follows the new built-in at the next launch — the user's own lines
         riding along untouched, the pre-migration file waiting in
         configs/backups/. An edited template would not match and never
-        moves (the pure cases in tests/settings/migrations)."""
+        moves (the pure cases in tests/prompts/migrations)."""
         app = launch(tmp_path / "state", server)
         app.close()
         prompts_file = app.paths.prompts_file
         stub = prompts_file.read_text(encoding="utf-8")
         stale = stub.replace(
-            toml_string(prompts_mod.EXTRACT_DEFAULT),
-            toml_string(EXTRACT_0_2_2),
+            toml_string(prompts_mod.DEFAULTS["extract_prompt"]),
+            toml_string(PAST[("extract_prompt", "0.2.2")]),
         )
         assert stale != stub  # the stub really held the current built-in
         prompts_file.write_text(stale + "# my note\n", encoding="utf-8")
 
         load_config(app.paths)
         migrated = prompts_file.read_text(encoding="utf-8")
-        assert tomllib.loads(migrated)["extract_prompt"] == prompts_mod.EXTRACT_DEFAULT
+        assert tomllib.loads(migrated)["extract_prompt"] == prompts_mod.DEFAULTS["extract_prompt"]
         assert "# my note" in migrated
         assert any(p.name.startswith("prompts-") for p in app.paths.config_backups_dir.iterdir())
 
@@ -1091,13 +1357,14 @@ class TestConfigMigration:
         prompts_file = app.paths.prompts_file
         stub = prompts_file.read_text(encoding="utf-8")
         stale = stub.replace(
-            toml_string(prompts_mod.CARD_FRAMING_DEFAULT), toml_string(CARD_FRAMING_0_7_0)
+            toml_string(prompts_mod.DEFAULTS["card_framing"]),
+            toml_string(PAST[("card_framing", "0.7.0")]),
         )
         assert stale != stub
         prompts_file.write_text(stale, encoding="utf-8")
         load_config(app.paths)
         migrated = tomllib.loads(prompts_file.read_text(encoding="utf-8"))
-        assert migrated["card_framing"] == prompts_mod.CARD_FRAMING_DEFAULT
+        assert migrated["card_framing"] == prompts_mod.DEFAULTS["card_framing"]
 
     def test_a_current_config_is_left_untouched(self, server: ModelServer, tmp_path) -> None:
         app = launch(tmp_path / "state", server)
@@ -1191,6 +1458,49 @@ class TestConfigMigration:
         assert "[providers.mine]" not in paths.config_file.read_text(encoding="utf-8")
         assert providers["mine"].url == "http://localhost:9/v1"  # the new home won
 
+    def test_the_models_an_older_state_file_names_move_under_their_roles(self, tmp_path) -> None:
+        """0.10.0 keeps each model under its role in `[models]`: the old
+        `model` and `extraction_model` keys move there and go — beside a
+        level from before 0.5.0, which still lands in the model's entry —
+        and the next launch changes nothing."""
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text("[settings]\nshow_banner = false\n", encoding="utf-8")
+        paths.state_file.write_text(
+            'model = "generic/test-model"\nextraction_model = "generic/extract-model"\n'
+            'story = 3\nthink = "high"\n\n[models]\ndictation = "generic/whisper"\n',
+            encoding="utf-8",
+        )
+        load_config(paths)
+        raw = tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
+        assert "model" not in raw and "extraction_model" not in raw
+        assert raw["models"] == {
+            "writing": "generic/test-model",
+            "extraction": "generic/extract-model",
+            "dictation": "generic/whisper",
+        }
+        assert raw["story"] == 3 and "think" not in raw
+        entries = tomllib.loads(paths.models_file.read_text(encoding="utf-8"))
+        assert entries["test-model"]["think"] == "high"
+        settled = paths.state_file.read_text(encoding="utf-8")
+        load_config(paths)
+        assert paths.state_file.read_text(encoding="utf-8") == settled
+
+    def test_a_role_the_state_file_already_sets_stands_over_its_old_key(self, tmp_path) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text("[settings]\nshow_banner = false\n", encoding="utf-8")
+        paths.state_file.write_text(
+            'model = "generic/old-model"\n\n[models]\nwriting = "generic/hand-edit"\n',
+            encoding="utf-8",
+        )
+        load_config(paths)
+        raw = tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
+        assert "model" not in raw
+        assert raw["models"]["writing"] == "generic/hand-edit"
+
     def test_a_hand_typed_plain_key_seals_at_the_next_launch(self, tmp_path) -> None:
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
@@ -1231,7 +1541,7 @@ class TestFirstLaunch:
             pictured = app.messages[16]
             assert pictured.role == "user" and len(pictured.attachments) == 2
             for picture in pictured.attachments:
-                assert app.store.files.get(picture.file) is not None
+                assert app.store.files.get_picture(picture.file) is not None
                 assert app.store.files.get_thumb(picture.file) is not None
                 assert picture.width <= 1568 and picture.height <= 1568
             assert all(not m.attachments for i, m in enumerate(app.messages) if i != 16)
@@ -1298,7 +1608,7 @@ class TestFirstLaunch:
                 # its portrait, where the row names one, through the intake
                 assert len(whole.pictures) == (1 if "picture" in row else 0)
                 for picture in whole.pictures:
-                    assert app.store.files.get(picture.file) is not None
+                    assert app.store.files.get_picture(picture.file) is not None
             unlinked = app.api.cards.unlinked.list()
             assert unlinked and not {row.name for row in unlinked} & set(named)
             assert app.server.requests == []  # still no model called
@@ -1362,24 +1672,24 @@ class TestFirstLaunch:
 
 
 class TestPurge:
-    """The state dir deleted — otaku's own folders, and the dir itself
-    where they were all it held — with its keys in the OS keychain."""
+    """The home folder deleted — otaku's own folders, and the folder
+    itself where they were all it held — with its keys in the OS keychain."""
 
-    def test_a_used_state_dir_is_gone(self, app: App) -> None:
+    def test_a_used_home_folder_is_gone(self, app: App) -> None:
         app.play("I enter the hall.")
         root = app.paths.root
         app.close()
         assert backend_launch.purge(root) == root
         assert not root.exists()
 
-    def test_what_else_the_dir_holds_stays_and_the_dir_with_it(self, app: App) -> None:
+    def test_what_else_the_folder_holds_stays_and_the_folder_with_it(self, app: App) -> None:
         root = app.paths.root
         (root / "notes.txt").write_text("mine", encoding="utf-8")
         app.close()
         backend_launch.purge(root)
         assert sorted(entry.name for entry in root.iterdir()) == ["notes.txt"]
 
-    def test_a_dir_never_made_is_purged_without_a_fault(self, tmp_path: Path) -> None:
+    def test_a_folder_never_made_is_purged_without_a_fault(self, tmp_path: Path) -> None:
         # nothing there, nothing under its keychain service: nothing fails
         backend_launch.purge(tmp_path / "state")
 
@@ -1415,29 +1725,37 @@ class TestResume:
         finally:
             opened.close()
 
-    def test_a_saved_extraction_model_of_a_deleted_provider_reports_and_goes(
-        self, app: App
-    ) -> None:
-        # The same promise for the model saved for extraction: reported,
-        # dropped, and extraction asks the story's model again.
-        app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
+    def test_a_role_model_of_a_deleted_provider_reports_and_goes(self, app: App) -> None:
+        # The same promise for the model saved for another role: reported,
+        # dropped from state.toml — extraction asks the story's model
+        # again, dictation has none.
+        app.api.app.update(
+            models={
+                ModelRole.EXTRACTION: ModelRef("generic", "extract-model"),
+                ModelRole.DICTATION: ModelRef("generic", "whisper"),
+            }
+        )
         state_file = app.paths.state_file
         state_file.write_text(
-            state_file.read_text(encoding="utf-8").replace(
-                '"generic/extract-model"', '"ghost/extract-model"'
-            ),
+            state_file.read_text(encoding="utf-8")
+            .replace('"generic/extract-model"', '"ghost/extract-model"')
+            .replace('"generic/whisper"', '"ghost/whisper"'),
             encoding="utf-8",
         )
         opened = backend_launch.open_app(app.paths.root)
         try:
-            extraction = Api(opened).app.get().extraction_model
-            assert extraction is not None and not extraction.pinned
             facts = Api(opened).app.get()
-            assert facts.model is not None and facts.extraction_model is not None
-            followed = (facts.extraction_model.provider, facts.extraction_model.name)
-            assert followed == (facts.model.provider, facts.model.name)
-            notices = Api(opened).app.get().launch_facts.notices
-            assert any("ghost/extract-model" in notice for notice in notices)
+            assert facts.model is not None
+            extraction = facts.models[ModelRole.EXTRACTION]
+            assert (extraction.provider, extraction.name) == (
+                facts.model.provider,
+                facts.model.name,
+            )
+            assert ModelRole.DICTATION not in facts.models
+            for gone in ("ghost/extract-model", "ghost/whisper"):
+                assert any(gone in notice for notice in facts.launch_facts.notices), gone
+            saved = tomllib.loads(state_file.read_text(encoding="utf-8"))["models"]
+            assert (saved["extraction"], saved["dictation"]) == ("", "")
         finally:
             opened.close()
 
@@ -1535,13 +1853,126 @@ def _v1_database(root) -> Paths:
     return paths
 
 
+def _names_home(monkeypatch, **named: str) -> None:
+    """The environment naming the home folder by `named` alone."""
+    for name in envvars.HOME:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in named.items():
+        monkeypatch.setenv(name, value)
+
+
+def _machine(
+    monkeypatch, tmp_path, *, is_checkout: bool, own_made: bool, default_made: bool
+) -> tuple:
+    """A machine whose user folder holds `~/.otaku` where `default_made`,
+    with otaku run from a git checkout where `is_checkout` — holding its
+    own `data/` where `own_made` — or from an install; returns the two
+    folders."""
+    user = tmp_path / "user"
+    monkeypatch.setenv("HOME", str(user))
+    monkeypatch.setenv("USERPROFILE", str(user))
+    default_folder = user / ".otaku"
+    if default_made:
+        default_folder.mkdir(parents=True)
+    checkout_folder = tmp_path / "checkout"
+    own_folder = checkout_folder / "data"
+    if own_made:
+        own_folder.mkdir(parents=True)
+    monkeypatch.setattr(
+        paths_mod, "checkout_folder", lambda: checkout_folder if is_checkout else None
+    )
+    return default_folder, own_folder
+
+
+def _day(age: int) -> str:
+    return (datetime.now().astimezone() - timedelta(days=age)).strftime("%Y%m%d")
+
+
+def _snapshot_name(age: int) -> str:
+    return f"history-{_day(age)}.db"
+
+
+def _plant_snapshots(backups_dir: Path) -> str:
+    """Daily snapshots from 1 to 5 days ago and two migrations' — 10 days
+    and a day and a half — each dated by its modification time, beside a
+    file of the reader's own; returns that file's name."""
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    aged = {_snapshot_name(age): age for age in range(1, 6)}
+    aged |= {"history-schema-v13.db": 10, "history-schema-v14.db": 1.5}
+    for name, age in aged.items():
+        path = backups_dir / name
+        path.write_bytes(b"snapshot")
+        os.utime(path, (now - age * 86400, now - age * 86400))
+    (backups_dir / "notes.txt").write_text("mine", encoding="utf-8")
+    return "notes.txt"
+
+
+def _plant_logs(logs_dir: Path, *, ages: tuple[int, ...]) -> None:
+    """A file of each log for each of `ages` days ago, where none is yet."""
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    for age in ages:
+        for name in (
+            f"requests-{_day(age)}.jsonl",
+            f"system-{_day(age)}.log",
+            f"error-{_day(age)}.log",
+        ):
+            path = logs_dir / name
+            if not path.exists():
+                path.write_text("planted\n", encoding="utf-8")
+
+
+def _log_days(logs_dir: Path) -> dict[str, set[str]]:
+    """The days each log has a file for."""
+    days: dict[str, set[str]] = {}
+    for path in logs_dir.iterdir():
+        found = re.fullmatch(r"(requests|system|error)-(\d{8})\.(jsonl|log)", path.name)
+        if found:
+            days.setdefault(found[1], set()).add(found[2])
+    return days
+
+
+def _left_by_old_deletes(database: Path, *, rows: int, share: float = 0.5) -> bytes:
+    """Rows written and the first `share` of them deleted the way a build
+    without `secure_delete` deleted them, their text left in the free
+    pages; returns the marker only the deleted rows carry."""
+    marker = f"deleted-{secrets.token_hex(6)}".encode()
+    deleted = int(rows * share)
+    conn = sqlite3.connect(database)
+    try:
+        conn.execute("PRAGMA secure_delete = OFF")
+        conn.executemany(
+            "INSERT INTO history (body, created_at) VALUES (?, ?)",
+            (
+                ((marker if n < deleted else b"kept") + b"x" * 2000, "2026-11-10")
+                for n in range(rows)
+            ),
+        )
+        conn.commit()
+        (first,) = conn.execute("SELECT min(id) FROM history").fetchone()
+        conn.execute("DELETE FROM history WHERE id < ?", (first + deleted,))
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+    return marker
+
+
+def _free_pages(database: Path) -> int:
+    conn = sqlite3.connect(database)
+    try:
+        return int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+    finally:
+        conn.close()
+
+
 def _open(paths: Paths) -> Store:
-    return Store.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir, keep=0)
+    return Store.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir)
 
 
 def _sealed(paths: Paths) -> Store:
     """The store over an encrypted database."""
-    return Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0)
+    return Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir)
 
 
 def _state(tmp_path) -> Paths:
@@ -1558,7 +1989,7 @@ def _files(paths: Paths) -> list:
 def _attach(store: Store, story_id: int, data: bytes) -> Attachment:
     """A picture into the folder under the story's number, and the row
     that names it."""
-    name = store.files.add(Owner.STORY, story_id, data, "image/jpeg")
+    name = store.files.add_picture(Owner.STORY, story_id, data, "image/jpeg")
     return Attachment(file=name, width=2, height=2, size=len(data))
 
 
@@ -1613,14 +2044,46 @@ def _ticking(monkeypatch) -> None:
 
     monkeypatch.setattr(Database, "now", staticmethod(now))
 
+    def test_step_15_keeps_no_card_file_and_reads_every_picture_as_a_portrait(
+        self, tmp_path
+    ) -> None:
+        # A version-14 card kept no file it came from, and recorded its
+        # pictures without a kind: after the step it keeps none, and each
+        # picture reads as the portrait every one was.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            card = store.cards.add("Maren")
+        finally:
+            store.close()
+        _taken_back(paths, 14)
+        recorded = {"file": "crd-0001-20261011-0b7e44d1.png", "width": 4, "height": 4, "size": 9}
+        conn = sqlite3.connect(paths.database_file)
+        conn.execute("UPDATE cards SET pictures = ? WHERE id = ?", (json.dumps([recorded]), card))
+        conn.commit()
+        conn.close()
+        store = _open(paths)
+        try:
+            found = store.cards.get(card)
+            assert found is not None and found.original_file is None
+            (picture,) = found.pictures
+            assert (picture.file, picture.kind, picture.name) == (
+                recorded["file"],
+                CardPictureKind.PORTRAIT,
+                "",
+            )
+        finally:
+            store.close()
+
 
 def _taken_back(paths: Paths, version: int) -> None:
     """A database this build wrote, put back to what `version` shipped:
     each later step's tables as the step found them — the record format is
     positional, so the rows read as that version's — the fork points step
-    12 works out and the columns step 14 adds emptied, and the stamp set:
-    what the ladder takes up."""
+    12 works out and the columns steps 14 and 15 add emptied, and the
+    stamp set: what the ladder takes up."""
     undo = {
+        15: (("cards", store_v15._V14_CARDS),),
         14: (("messages", store_v14._V13_MESSAGES),),
         13: (("cards", store_v13._V12_CARDS), ("characters", store_v13._V12_CHARACTERS)),
         12: (("stories", store_v12._V11_STORIES),),
@@ -1631,6 +2094,8 @@ def _taken_back(paths: Paths, version: int) -> None:
         conn.execute("UPDATE stories SET forked_from_message_id = NULL")
     if version < 14:
         conn.execute("UPDATE messages SET pinned = 0, word_count = NULL")
+    if version < 15:
+        conn.execute("UPDATE cards SET original_file = NULL")
     conn.execute("PRAGMA writable_schema = ON")
     for step in range(int(SCHEMA_VERSION), version, -1):
         for table, ddl in undo[step]:

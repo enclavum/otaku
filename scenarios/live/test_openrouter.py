@@ -2,6 +2,10 @@
 short prompt to a popular cheap model (a fraction of a cent). Marked
 `live`; they skip themselves when OPENROUTER_API_KEY is not set. The
 model comes from OTAKU_LIVE_OPENROUTER_MODEL, default openai/gpt-4o-mini.
+The dictation smoke writes down a sentence spoken by this machine's
+voice with OTAKU_LIVE_OPENROUTER_DICTATION_MODEL, default
+mistralai/voxtral-mini-transcribe-3-0; it skips where no dictation model
+is offered.
 """
 
 import os
@@ -11,11 +15,14 @@ import pytest
 
 from otaku.providers.clients.openrouter import OpenRouterClient
 from otaku.settings.providers import ProviderConfig
+from scenarios.support.live import assert_written_down, dictation_model, require_env, spoken_wav
 from scenarios.support.live import live_app as build_app
-from scenarios.support.live import require_env
 
 URL = "https://openrouter.ai/api/v1"
 MODEL = os.environ.get("OTAKU_LIVE_OPENROUTER_MODEL", "openai/gpt-4o-mini")
+DICTATION_MODEL = os.environ.get(
+    "OTAKU_LIVE_OPENROUTER_DICTATION_MODEL", "mistralai/voxtral-mini-transcribe-3-0"
+)
 
 pytestmark = pytest.mark.live
 
@@ -37,6 +44,10 @@ class TestOpenRouter:
         chain = live_app.store.stories.get_messages(live_app.story_id)
         assert chain[1].role == "assistant"
         assert chain[1].body.strip()
+
+    def test_a_recording_is_written_down(self, live_app, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+        model = dictation_model(live_app, "openrouter", DICTATION_MODEL)
+        assert_written_down(live_app, "openrouter", model, spoken_wav(tmp_path))
 
 
 @pytest.fixture

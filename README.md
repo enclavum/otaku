@@ -18,11 +18,11 @@ The three pillars of otaku:
 
 Web interface:
 
-![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.9.0)
+![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.10.0)
 
 Terminal interface:
 
-![otaku terminal](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-terminal.png?v=0.9.0)
+![otaku terminal](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-terminal.png?v=0.10.0)
 
 ## Demo
 
@@ -52,6 +52,8 @@ Writing:
 - **custom context size limit**: you can cap the context size yourself;
 - **transparent context**: you can see what will be sent to the model with the `/context` command;
 - **attaching pictures**: if the model supports vision, you can attach pictures to your messages;
+- **dictation**: speak your turns — with a speech-to-text model, the mic button in the web
+  interface or Ctrl+G in the terminal writes what you say into the prompt line;
 - **helper commands**: `/ooc` and `/cue` to steer the plot, `/me` and `/you` to say who is
   speaking.
 
@@ -79,7 +81,8 @@ Tools the model can use (switched on per story, in the story dossier's Tools tab
 
 Import your existing content:
 
-- **character cards** — into the characters library, or into a story you've already started;
+- **character cards** — PNG, JSON and CHARX files, or links from card sites — into the characters
+  library, or into a story you've already started;
 - **SillyTavern chats** — creates a new story that you can continue;
 - **a plain text file** — will be split into turns, and you can play with the characters in it.
 
@@ -87,22 +90,18 @@ Planned (a release every one to two weeks):
 
 - **lorebooks**, including import from SillyTavern — not implemented yet, but you can import world
   info into the system message;
-- **per-character context** for better character isolation;
-- **audio input**: speak instead of typing your turns.
+- **per-character context** for better character isolation.
 
 ## Requirements
 
 - Platform: Windows / macOS / Linux.
+- Python 3.11+ **or** Docker.
 - Local LLM provider(s) **or** an API key for cloud provider(s).
-
-Providers supported: llama.cpp, KoboldCpp, Ollama, oMLX, LM Studio; OpenRouter and
-NanoGPT; and any other OpenAI-compatible server through the Generic OpenAI provider, by URL and
-key.
 
 ## Installation
 
 The recommended way is the installation script, which first installs the `uv` package manager — if
-you don't have it yet — and then installs otaku with it.
+you don't have it yet — and then installs otaku with it. _To run otaku without installing from a git checkout, see [Launch without installation](#launch-without-installation)._
 
 ```bash
 # macOS and Linux
@@ -124,9 +123,7 @@ brew install enclavum/tap/otaku
 
 # run in Docker (only the web interface accessible)
 docker compose -f https://github.com/enclavum/otaku.git up -d
-
-# run in Docker if you've checked out the repo
-docker compose up -d
+# then open http://localhost:9600
 ```
 
 How to update:
@@ -146,10 +143,38 @@ otaku uninstall  # also purges data on request
 In the terminal, type one of the two commands:
 
 - `otaku` — opens the terminal UI;
-- `otaku serve` — makes the web interface available at http://localhost:9600 (can be
-  [configured](#web-interface-settings)).
+- `otaku serve` — serves the web interface at http://localhost:9600.
+- `otaku serve --any-host` — serves the web interface at http://localhost:9600, available over the network.
 
-The terminal UI can also serve the web interface while it runs: type `/set serve on`.
+### Launch without installation
+
+You can run the app without installing it, from the checked-out repo.
+
+With Python 3.11+, `venv` and `pip`:
+
+```bash
+git clone https://github.com/enclavum/otaku.git
+cd otaku
+
+# macOS and Linux
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/otaku          # or: .venv/bin/otaku serve
+
+# Windows
+py -m venv .venv
+.venv\Scripts\pip install -e .
+.venv\Scripts\otaku      # or: .venv\Scripts\otaku serve
+```
+
+With Docker (only the web interface accessible):
+
+```bash
+docker compose up -d
+# then open http://localhost:9600
+```
+
+## First start
 
 On first start, you choose a provider and a model. Otaku automatically detects local LLM
 backends, while for cloud providers (OpenRouter, NanoGPT) you have to enter their API keys.
@@ -261,10 +286,11 @@ You can use the `/context` command to see what exactly will be sent to the model
 
 ### Configuration files
 
-Everything lives in the state dir, `~/.otaku` by default:
+Everything lives in otaku's home folder — `~/.otaku` by default, or `data/` when run from a
+checkout:
 
-- `configs/config.toml` — context shape, extraction thresholds, encryption, backups, and terminal
-  and web settings.
+- `configs/config.toml` — context shape, extraction thresholds, encryption, backups, logs, and
+  terminal and web settings.
 - `configs/providers.toml` — one section per provider (URL, API key). The model picker edits it
   for you, and API keys are stored sealed.
 - `configs/integrations.toml` — the web search key, stored sealed; the Tools tab edits it for you.
@@ -279,8 +305,8 @@ keeping the pre-edit file in `configs/backups/`. `prompts.toml` migrates the sam
 template you left unedited follows a new release's built-in, and one you've edited is never
 touched.
 
-Set `OTAKU_CONFIG_DIR` to run a completely separate environment:
-`OTAKU_CONFIG_DIR=~/.otaku-alt otaku`.
+Set `OTAKU_HOME` to run a completely separate environment:
+`OTAKU_HOME=~/.otaku-alt otaku`.
 
 ### Web interface settings
 
@@ -288,7 +314,8 @@ Set `OTAKU_CONFIG_DIR` to run a completely separate environment:
 
 By default, the web interface is available on the local machine only. You can make it available
 over the network by changing the `host` parameter in the `[web]` section of
-`~/.otaku/configs/config.toml` from `localhost` to `0.0.0.0`.
+`~/.otaku/configs/config.toml` from `localhost` to `0.0.0.0` — or, for one run, with
+`otaku serve --any-host`.
 
 _If you go public, you should also consider turning on the next two parameters, `https` and
 `password`, for privacy._
@@ -313,8 +340,9 @@ design. The custom properties it can set are listed in
 
 ## Storage and privacy
 
-Stories live in a local SQLite database; the database is snapshotted daily into the state dir,
-the last seven kept (configurable).
+Stories live in a local SQLite database; the database is snapshotted daily into otaku's home
+folder, the last seven kept (configurable). Logs are kept for seven days (adjustable in the settings
+file).
 
 Pictures attached to a turn and cards' pictures are kept beside the database, downsized and
 stripped of their metadata; they are not part of the daily snapshot.

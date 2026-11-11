@@ -23,7 +23,7 @@ codes, and pure logic with many cases. Where the printed text IS the
 payload (`/context` previews the wire verbatim), asserting it is asserting
 the payload, not the copy.
 
-Unit tests (`tests/`, `make test`) are written test-first, from the
+Unit tests (`tests/`, `make tests`) are written test-first, from the
 module's documented contract — never by reading its code, so they check
 what the module promises rather than what it happens to do — and ONLY for
 pure functions: no disk, network, database, or terminal, the architecture
@@ -46,3 +46,11 @@ real providers, `cli` drives the real binary in a subprocess or a pty
 and only a selector leaves it out: the Makefile and CI name theirs, and
 a pytest run outside them adds `and not slow` to its `-m`, or passes
 `-m "not slow"` when it has none.
+
+`integration` marks the integrations against the real services they
+ask (`scenarios/integrations`): `live` too, so every offline run leaves
+them out, and run alone by `make integrations` and by a workflow of
+their own twice a week (`.github/workflows/integrations.yml`), apart from
+CI — a service changes on its own schedule, and a red run there means
+one did. A new
+integration, or a new site for one, arrives with its test there.

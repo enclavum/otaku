@@ -144,7 +144,7 @@ def _run(app: App, terminated: threading.Event) -> None:
         )
     carry = Carry()
     assembler = LineAssembler()
-    prompt_session, answers = build_prompt(
+    prompt_session, answers, dictation = build_prompt(
         api,
         carry,
         assembler,
@@ -260,7 +260,7 @@ def _run(app: App, terminated: threading.Event) -> None:
         try:
             line = prompt_session.prompt(
                 message,
-                placeholder=placeholder,
+                placeholder=dictation.placeholder(placeholder),
                 default=carry.take_text(),
                 pre_run=functools.partial(
                     _opening,
@@ -391,9 +391,10 @@ def _run(app: App, terminated: threading.Event) -> None:
                 # would have
                 chat.ledger.below_text(prefix + submission)
             if not submission.strip() and not is_story_mode:
-                # A bare Enter leaves its prompt row on screen; its rows
-                # stay counted so the next submission's erase takes it
-                # too. In the canvas it is the continue: it plays.
+                # An empty block sends nothing; its rows stay counted so
+                # the next submission's erase takes them too (a bare Enter
+                # never gets here, `keys.make_bindings`). In the canvas
+                # an empty line is the continue: it plays.
                 continue
 
         # the continue: the canvas's empty line, which the stream places

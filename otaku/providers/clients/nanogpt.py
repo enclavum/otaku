@@ -24,6 +24,7 @@ from otaku.providers.openai.completion import (
     Bounds,
     OpenAICompletion,
 )
+from otaku.providers.openai.dictation import OpenAIDictation
 from otaku.providers.openai.models import Locality, ModelCapabilities, ModelInfo, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
@@ -39,7 +40,8 @@ class NanoGptModels(OpenAIModels):
     listing_keyed = True
     # The plain listing hides the model details; the flag adds each
     # model's max context and capabilities to the entries.
-    listing_query = "?detailed=true"
+    completion_query = "?detailed=true"
+    dictation_query = "/audio-models?type=stt"
 
     def _decode(self, listed: dict[str, Any], model: ModelInfo) -> ModelInfo:
         model = replace(model, max_output_tokens=positive_int(listed.get("max_output_tokens")))
@@ -108,6 +110,11 @@ class NanoGptCompletion(OpenAICompletion):
         return (*counts, None) if any(count is not None for count in counts) else None
 
 
+class NanoGptDictation(OpenAIDictation):
+    # The recordings its transcription endpoint takes, as documented.
+    formats = frozenset({"wav", "mp3", "ogg", "m4a", "aac"})
+
+
 class NanoGptClient(OpenAIClient):
     id = "nanogpt"
     label = "NanoGPT"
@@ -116,6 +123,7 @@ class NanoGptClient(OpenAIClient):
     auth_class = NanoGptAuth
     models_class = NanoGptModels
     completion_class = NanoGptCompletion
+    dictation_class = NanoGptDictation
 
     @classmethod
     def autoconfigure(cls) -> ProviderConfig:

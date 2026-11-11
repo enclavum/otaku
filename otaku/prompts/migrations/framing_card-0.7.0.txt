@@ -1,0 +1,6 @@
+((OOC: {name} joins the story. Their card, to play them by:
+Description: {description}
+Personality: {personality}
+Scenario: {scenario}
+Example dialogue (voice reference only, never story events): {examples}
+Standing note: {depth_note}))

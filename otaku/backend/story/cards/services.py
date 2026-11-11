@@ -1,8 +1,10 @@
-"""A character card into a story, always through the codex: a card FILE's
-bytes go into the codex first (`codex.cards.services` — a file it holds
-already makes nothing) and the codex card is brought in; a codex card is
-brought in as it stands (an invite). Read and vetted for the story,
-nothing stored (`check_card`), then brought in (`import_card`), or
+"""A character card into a story, through the codex: a card FILE's bytes
+go into the codex first (`codex.cards.services` — a file it holds
+already makes nothing) and the codex card is brought in — or, asked to
+(`story_only`), the file's card into the story alone, its character
+linked to no card; a codex card is brought in as it stands (an invite).
+Read and vetted for the story, nothing stored (`check_card`), then
+brought in (`import_card`), or
 several at a story's start (`bring_in_cards`): per card the typed /card
 row, the story's character — a COPY of the card's profile as its own,
 linked to the codex card — and the greeting turn; NO model call.
@@ -21,13 +23,16 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 
 from otaku.backend.app.core.services import App
+from otaku.backend.app.pictures.services import save
 from otaku.backend.codex.cards import services as codex_cards
 from otaku.backend.errors import NO_SUCH_STORY, Conflict, HeadMoved, Invalid, NotFound
 from otaku.backend.story import chain
 from otaku.backend.story.settings.services import settings_of
 from otaku.context.cards import CARD_PROVIDER, CharacterProfile, bind, card_to_wire
 from otaku.context.prompt import estimate_tokens
-from otaku.store.schema import Card, Message, StoryMode
+from otaku.store.pictures import Attachment
+from otaku.store.schema import Card, Message
+from otaku.store.story import StoryMode
 
 # A card block above roughly this many tokens gets a warning: it rides
 # every request verbatim and never leaves the context, so on a small
@@ -41,8 +46,9 @@ class CheckedCard:
     in with, what reading it noted, the composed block's cost estimate and
     whether it is worth warning about, the persona the story remembers
     ("" for none), whether a portrait could ride its row, and — for a
-    file — the codex card it is already (None for none) and the codex
-    cards of the same name the reader may say it is."""
+    file — the thumbnail of the picture it carries (None for none), the
+    codex card it is already (None for none) and the codex cards alike,
+    of the same name or picture."""
 
     profile: CharacterProfile
     notes: tuple[str, ...]
@@ -50,6 +56,7 @@ class CheckedCard:
     large: bool
     persona: str
     has_picture: bool
+    thumbnail: bytes | None
     same_card: Card | None
     similar_cards: tuple[Card, ...]
 
@@ -58,12 +65,27 @@ class CheckedCard:
 class BroughtIn:
     """A card brought into a story: the recorded /card row, its
     greeting turn (None where the card has none or another card greets),
-    the story's character and the codex card it is linked to."""
+    the story's character and the codex card it is linked to (None for a
+    card the story alone holds)."""
 
     line: Message
     greeting: Message | None
     character_id: int
-    card_id: int
+    card_id: int | None
+
+
+@dataclass(frozen=True)
+class _IncomingCard:
+    """A card on its way into a story, as its character is made from it:
+    the card's own profile, the codex card it is linked to (None for a
+    card the story alone holds), the card's name and aliases, and its
+    portrait (None for none)."""
+
+    profile: CharacterProfile
+    card_id: int | None
+    name: str
+    aliases: tuple[str, ...]
+    portrait: Attachment | None
 
 
 def check_card(
@@ -73,28 +95,33 @@ def check_card(
     data: bytes | None = None,
     file_name: str = "",
     card_id: int | None = None,
-    rename: str = "",
+    name: str | None = None,
 ) -> CheckedCard:
     """The card a file holds — or the codex card `card_id` — vetted for the
-    story and nothing stored; `rename` overrides its name. Raises Refused
-    — not a card, no such codex card, a cast name already taken, the card
-    in the story already."""
+    story and nothing stored, under `name` where one is asked, else its
+    own. Raises Refused — not a card, no such codex card, a name asked
+    that is blank, a cast name already taken, the card in the story
+    already."""
+    thumbnail: bytes | None = None
     if data is not None:
         checked = codex_cards.check_card_file(app, data, file_name)
         same = checked.same_card
         profile = codex_cards.card_profile(same) if same is not None else checked.profile
         notes, has_picture, similar = checked.notes, checked.has_picture, checked.similar_cards
+        thumbnail = checked.thumbnail
     elif card_id is not None:
         same = codex_cards.get_card(app, card_id)
         profile, notes, has_picture, similar = (
             codex_cards.card_profile(same),
             (),
-            bool(same.pictures),
+            bool(same.portraits),
             (),
         )
     else:
-        raise Invalid("A card is brought in from a file or from the codex.")
-    profile = replace(profile, name=rename.strip() or profile.name)
+        raise Invalid("A card is brought in from a file or from Characters.")
+    _ensure_written(profile, has_picture=has_picture)
+    if name is not None:
+        profile = replace(profile, name=_character_name(name))
     _ensure_free(app, story_id, profile.name, same)
     remembered = _remembered_persona(app, story_id)
     tokens = _block_tokens(app, profile, remembered)
@@ -104,7 +131,8 @@ def check_card(
         block_tokens=tokens,
         large=tokens > _LARGE_CARD_TOKENS,
         persona=remembered,
-        has_picture=has_picture or (same is not None and bool(same.pictures)),
+        has_picture=has_picture or (same is not None and bool(same.portraits)),
+        thumbnail=thumbnail,
         same_card=same,
         similar_cards=similar,
     )
@@ -114,53 +142,78 @@ def import_card(
     app: App,
     story_id: int,
     *,
-    data: bytes | None = None,
-    file_name: str = "",
+    prepared: codex_cards.PreparedCardFile | None = None,
     card_id: int | None = None,
-    rename: str = "",
+    name: str,
     reuse: int | None = None,
+    tagline: str = "",
     persona: str,
     with_pictures: bool = False,
+    story_only: bool = False,
     line: str = "",
     expected_head: int | None,
 ) -> tuple[BroughtIn, str]:
     """A card brought into the story, played on from `expected_head`, the
     head the caller read (HeadMoved where the head stands elsewhere,
-    nothing written — the codex included): a card FILE goes into the
-    codex first (`reuse` the codex card the reader says it is), a codex
-    card `card_id` as it stands. Then the typed row (speaker-linked to
-    the new cast row, carrying the card's portrait where `with_pictures` asks
-    and it has one), the character with a copy of the card's profile,
-    linked to the codex card, and the greeting turn — answered with the
-    one-line report. `/undo` takes the exchange whole — the unplayed
-    character with it; the codex card stays. `line` is what the story
-    RECORDS; the default names the file, or the codex card."""
+    nothing written — the codex included): a card FILE, read and its
+    pictures passed through the intake beforehand
+    (`codex.prepare_card_file`, off the app's thread where the caller is),
+    goes into the codex first, under its own name whatever `name` says
+    (`reuse` the codex card the reader says it is, `tagline` a card made
+    there's), a codex card `card_id` as it stands; `name` is the story's
+    character's alone. With
+    `story_only`, a file the codex holds not — nor `reuse` names — goes
+    into the story alone: nothing written to the codex, its character
+    linked to no card, its portrait a picture of the story's. Then the
+    typed row (speaker-linked to the new cast row, carrying the card's
+    portrait where `with_pictures` asks and it has one), the character
+    with a copy of the card's profile, linked to the codex card, and the
+    greeting turn — answered with the one-line report. `/undo` takes the
+    exchange whole — the unplayed character with it; the codex card
+    stays. `line` is what the story RECORDS; the default names the file,
+    or the codex card."""
     _check_head(app, story_id, expected_head)
-    if data is not None:
+    if prepared is not None:
+        data, file_name = prepared.data, prepared.file_name
         checked = codex_cards.check_card_file(app, data, file_name)
         target = checked.same_card or (
             codex_cards.get_card(app, reuse) if reuse is not None else None
         )
-        name = rename.strip() or (target.name if target is not None else checked.profile.name)
+        name = _character_name(name)
+        own = target.name if target is not None else checked.profile.name
+        if target is not None:
+            _ensure_written(codex_cards.card_profile(target), has_picture=bool(target.portraits))
+        else:
+            _ensure_written(checked.profile, has_picture=checked.has_picture)
         _ensure_free(app, story_id, name, target)
-        card_id, made, _ = codex_cards.import_card_file(
-            app, data, file_name, rename=rename, reuse=reuse
-        )
-        notes = [*checked.notes, "added to the codex" if made else "the codex's card"]
-        default_line = f"/card {file_name}" + (f" {rename.strip()}" if rename.strip() else "")
+        default_line = f"/card {file_name}" + (f" {name}" if name != own else "")
+        if story_only and target is None:
+            incoming = _incoming_story_only(app, story_id, checked.profile, prepared, with_pictures)
+            notes = [*map(_fragment, checked.notes), "kept in this story only"]
+        else:
+            # The codex keeps the card as it came: another name is this story's.
+            card_id, made, _ = codex_cards.store_card_file(
+                app, prepared, reuse=reuse, tagline=tagline
+            )
+            incoming = _incoming_from_codex(codex_cards.get_card(app, card_id))
+            notes = [
+                *map(_fragment, checked.notes),
+                "added to Characters" if made else "the card in Characters",
+            ]
     elif card_id is not None:
         target = codex_cards.get_card(app, card_id)
-        name = rename.strip() or target.name
+        name = _character_name(name)
+        _ensure_written(codex_cards.card_profile(target), has_picture=bool(target.portraits))
         _ensure_free(app, story_id, name, target)
+        incoming = _incoming_from_codex(target)
         notes, default_line = [], f"/card {name}"
     else:
-        raise Invalid("A card is brought in from a file or from the codex.")
-    card = codex_cards.get_card(app, card_id)
+        raise Invalid("A card is brought in from a file or from Characters.")
     mode = settings_of(app, story_id).layout.mode
     brought, profile = _bring_in(
         app,
         story_id,
-        card,
+        incoming,
         name=name,
         persona=persona,
         with_pictures=with_pictures,
@@ -174,7 +227,7 @@ def import_card(
         app, story_id, brought.character_id, profile, persona, mode, after=brought.line.id
     )
     tokens = _block_tokens(app, profile, persona)
-    verb = "imported" if data is not None else "invited"
+    verb = "imported" if prepared is not None else "invited"
     report = [f"{verb} {name} (card ≈ {tokens} tokens)", *notes]
     if tokens > _LARGE_CARD_TOKENS:
         report.append("a large card — it rides every request and never leaves the context")
@@ -183,13 +236,16 @@ def import_card(
 
 def check_cards(app: App, card_ids: Sequence[int]) -> tuple[Card, ...]:
     """The codex cards a story is started with, in pick order — refused
-    for a card the codex does not hold, one picked twice, and two of one
-    name, which one story's cast cannot hold."""
+    for a card the codex does not hold, one picked twice, one with
+    neither text nor a picture (`_is_playable`), and two of one name, which
+    one story's cast cannot hold."""
     if len(set(card_ids)) != len(card_ids):
         raise Invalid("A card is picked twice.")
     picked = tuple(codex_cards.get_card(app, card_id) for card_id in card_ids)
     seen: set[str] = set()
     for card in picked:
+        if not _is_playable(codex_cards.card_profile(card), has_picture=bool(card.portraits)):
+            raise Conflict(f"{card.name} card is empty, cannot start a story with it.")
         if card.name.casefold() in seen:
             raise Conflict(f"Two of the cards are called {card.name} — rename one first.")
         seen.add(card.name.casefold())
@@ -216,7 +272,7 @@ def bring_in_cards(
         one, profile = _bring_in(
             app,
             story_id,
-            card,
+            _incoming_from_codex(card),
             name=card.name,
             persona=persona,
             with_pictures=card.id in card_pictures,
@@ -240,7 +296,7 @@ def bring_in_cards(
 def _bring_in(
     app: App,
     story_id: int,
-    card: Card,
+    incoming: _IncomingCard,
     *,
     name: str,
     persona: str,
@@ -249,13 +305,13 @@ def _bring_in(
     mode: StoryMode,
     after: int | None,
 ) -> tuple[BroughtIn, CharacterProfile]:
-    """One codex card's row and character: the typed row (its portrait on
-    it where asked and the card has one), the character — the card's
+    """One card's row and character: the typed row (its portrait on it
+    where asked and the card has one), the character — the card's
     profile under `name` as its copy, the card's name and aliases its
-    aliases, linked to the card — and the row's speaker link. Answered
-    with the profile as the story holds it, which its greeting speaks
-    from."""
-    profile = replace(codex_cards.card_profile(card), name=name, user=persona)
+    aliases, linked to the codex card where there is one — and the row's
+    speaker link. Answered with the profile as the story holds it, which
+    its greeting speaks from."""
+    profile = replace(incoming.profile, name=name, user=persona)
     row = chain.append_message(
         app,
         story_id,
@@ -264,13 +320,13 @@ def _bring_in(
             body=line,
             kind="card",
             mode=mode,
-            attachments=card.pictures[:1] if with_pictures else (),
+            attachments=(incoming.portrait,) if with_pictures and incoming.portrait else (),
         ),
         after=after,
     )
     aliases = tuple(
         alias
-        for alias in dict.fromkeys([card.name, *card.aliases])
+        for alias in dict.fromkeys([incoming.name, *incoming.aliases])
         if alias.casefold() != name.casefold()
     )
     # Made by the card, no model — the file it came from is in its profile.
@@ -280,13 +336,41 @@ def _bring_in(
         aliases=aliases,
         profile=profile.to_toml(),
         provider=CARD_PROVIDER,
-        card_id=card.id,
+        card_id=incoming.card_id,
     )
     # The speaker link is the compose key: the row was recorded before
     # the cast row could exist, so the attribution follows it.
     app._store.messages.set_speaker(row.id, character_id, name)
     recorded = replace(row, speaker=name, speaker_id=character_id)
-    return BroughtIn(recorded, None, character_id, card.id), profile
+    return BroughtIn(recorded, None, character_id, incoming.card_id), profile
+
+
+def _incoming_from_codex(card: Card) -> _IncomingCard:
+    """A codex card on its way into a story, linked to it."""
+    return _IncomingCard(
+        codex_cards.card_profile(card),
+        card.id,
+        card.name,
+        card.aliases,
+        # the portrait rides the card's row as a turn's picture does
+        Attachment.of(card.portraits[0]) if card.portraits else None,
+    )
+
+
+def _incoming_story_only(
+    app: App,
+    story_id: int,
+    profile: CharacterProfile,
+    prepared: codex_cards.PreparedCardFile,
+    with_pictures: bool,
+) -> _IncomingCard:
+    """A card file's card on its way into a story that alone will hold
+    it: its profile, no codex card, and its picture — stored as the
+    story's, where its row is to carry it — its portrait."""
+    portrait = None
+    if with_pictures and prepared.main is not None:
+        portrait = save(app._store.files, prepared.main, story_id, Attachment)
+    return _IncomingCard(profile, None, profile.name, (), portrait)
 
 
 def _greet(
@@ -323,6 +407,12 @@ def _greet(
     )
 
 
+def _fragment(sentence: str) -> str:
+    """A note's sentence as the report's lowercase line carries it: its
+    first letter down, its full stop off."""
+    return sentence[:1].lower() + sentence[1:].removesuffix(".")
+
+
 def _check_head(app: App, story_id: int, expected_head: int | None) -> None:
     """The story there, its head where the caller saw it — checked before
     the codex is written, so a refusal leaves both as they were."""
@@ -331,6 +421,29 @@ def _check_head(app: App, story_id: int, expected_head: int | None) -> None:
     head = app._store.stories.get_head(story_id)
     if head != expected_head:
         raise HeadMoved(head)
+
+
+def _character_name(name: str) -> str:
+    """The name a story's character is brought in under, trimmed;
+    refused where it is blank."""
+    cleaned = name.strip()
+    if not cleaned:
+        raise Invalid("A character needs a name.")
+    return cleaned
+
+
+def _ensure_written(profile: CharacterProfile, *, has_picture: bool) -> None:
+    """Refused where the card gives a story nothing but its name
+    (`_is_playable`)."""
+    if not _is_playable(profile, has_picture=has_picture):
+        raise Conflict(f"{profile.name} has no text yet.")
+
+
+def _is_playable(profile: CharacterProfile, *, has_picture: bool) -> bool:
+    """Whether a card gives a story more than its name: text
+    (`codex_cards.is_blank` says it has none yet), or a picture — a name
+    and a picture are enough."""
+    return has_picture or not codex_cards.is_blank(profile)
 
 
 def _ensure_free(app: App, story_id: int, name: str, card: Card | None) -> None:
@@ -359,6 +472,7 @@ def _block_tokens(app: App, profile: CharacterProfile, persona: str) -> int:
         card_to_wire(
             replace(profile, user=persona or "you").to_toml(),
             app._prompts().card_framing,
+            app._prompts().card_empty_framing,
             char=profile.name,
         )
     )

@@ -65,6 +65,7 @@ PROBE_TIMEOUT = 1.5  # a best-effort native read, never worth a turn's wait
 LISTING_TIMEOUT = 5.0  # the picker's fan-out: one dead provider costs at most this
 REPLY_TIMEOUT = 600.0  # a reply, read chunk by chunk for as long as a model takes
 LOAD_TIMEOUT = 600.0  # a load or unload, start to finish: weights read from disk, or fetched
+DICTATION_TIMEOUT = 120.0  # a recording written down, the model loaded first where it was not
 # How often a thread waiting on another's call asks its caller whether
 # anybody still waits (`ticking`).
 _IDLE_TICK = 0.05
@@ -149,7 +150,7 @@ class Http:
         """GET `url`, parsed. `timeout` caps this one call — None leaves
         it to the budget, or to nothing outside one; `quiet` answers
         None to any failure instead of raising, for a best-effort read."""
-        return self._request("GET", url, None, purpose, timeout, quiet)
+        return self._request("GET", url, None, None, purpose, timeout, quiet)
 
     def post(
         self,
@@ -163,7 +164,20 @@ class Http:
     ) -> Any:
         """POST `body`, parsed, as `get`. With no cap and no budget it
         waits as long as a model load takes."""
-        return self._request("POST", url, body, purpose, timeout, quiet, cut)
+        return self._request("POST", url, body, None, purpose, timeout, quiet, cut)
+
+    def upload(
+        self,
+        url: str,
+        fields: dict[str, str],
+        file: tuple[str, bytes, str],
+        *,
+        purpose: str = "",
+        timeout: float | None = None,
+    ) -> Any:
+        """POST `fields` and `file` — its name, its bytes, its media type
+        — as a form under the field "file", parsed, as `post`."""
+        return self._request("POST", url, None, (fields, file), purpose, timeout, False)
 
     def stream(
         self, url: str, body: dict[str, Any], *, timeout: float, cut: Cut | None = None
@@ -249,14 +263,16 @@ class Http:
         method: str,
         url: str,
         body: dict[str, Any] | None,
+        form: tuple[dict[str, str], tuple[str, bytes, str]] | None,
         purpose: str,
         timeout: float | None,
         quiet: bool,
         cut: Cut | None = None,
     ) -> Any:
         """One request, parsed, its failure filed under `purpose` — the
-        call's own, else the view's. `quiet` answers None to any failure
-        instead, with the handshake capped at a second: a best-effort
+        call's own, else the view's. Its payload is `body`, as JSON, or
+        `form`: its fields and its one file. `quiet` answers None to any
+        failure instead, with the handshake capped at a second: a best-effort
         probe must not wait on a dead host — and files nothing, so it
         needs no purpose. `cut`, when given, is armed with the
         connection as a stream's is: cut from another thread, the
@@ -273,6 +289,8 @@ class Http:
                         method,
                         url,
                         json=body,
+                        data=form[0] if form is not None else None,
+                        files={"file": form[1]} if form is not None else None,
                         headers=self._headers,
                         timeout=_timeout(
                             capped, _QUIET_CONNECT_TIMEOUT if quiet else _CONNECT_TIMEOUT

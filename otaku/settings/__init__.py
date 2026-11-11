@@ -28,14 +28,13 @@ _COMMENT_COLUMN = 30
 @dataclass(frozen=True)
 class SettingsFiles:
     """Where the files this package works on live — handed down by the
-    launch, since this package resolves no locations itself: the four
-    settings files, the per-model overrides, and the directory the
-    surgical edits keep their backups in."""
+    launch, since this package resolves no locations itself: the settings
+    files, the per-model overrides, and the directory the surgical edits
+    keep their backups in."""
 
     config: Path
     providers: Path
     integrations: Path
-    prompts: Path
     state: Path
     models: Path
     backups_dir: Path

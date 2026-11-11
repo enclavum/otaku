@@ -1,7 +1,8 @@
-"""The prompt's keys: the shortcut keys that submit a command, the
-canvas's paragraph and history walk, the slash menu's Enter, Tab, Esc
-and Backspace, ↑/↓ through the menu or the history, and the answers'
-keys while their rows are shown (`make_bindings`)."""
+"""The prompt's keys: the shortcut keys that submit a command, Enter on
+an empty line, the canvas's paragraph and history walk, the slash menu's
+Enter, Tab, Esc and Backspace, ↑/↓ through the menu or the history, the
+answers' keys while their rows are shown, and dictation's
+(`make_bindings`)."""
 
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -15,6 +16,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 
 from otaku.terminal.prompt.answers import AnswerMenu
+from otaku.terminal.prompt.dictation import Dictation
 from otaku.terminal.prompt.lines import Carry
 
 # PROTOTYPE: Ctrl+Enter told from Enter where the terminal reports it —
@@ -30,6 +32,8 @@ for _sequence in _CONTROL_ENTER:
 # With a draft on the line it falls through to delete-forward, so readline
 # muscle memory can never quit the app over a draft.
 _EMPTY_LINE = Condition(lambda: not get_app().current_buffer.text)
+# Nothing on the line but whitespace: Enter sends nothing there.
+_LINE_BLANK = Condition(lambda: not get_app().current_buffer.text.strip())
 
 
 def make_bindings(
@@ -38,6 +42,7 @@ def make_bindings(
     shortcuts: Mapping[str, tuple[str, str]],
     answers: AnswerMenu,
     history: Callable[[], Sequence[str]],
+    dictation: Dictation,
 ) -> KeyBindings:
     kb = KeyBindings()
     # PROTOTYPE: in the canvas Enter sends, as everywhere, and Ctrl+Enter
@@ -110,6 +115,12 @@ def make_bindings(
         # with a draft it falls through to delete-forward, so readline
         # muscle memory can never quit the app over a draft.
         kb.add(key, filter=_EMPTY_LINE if key == "c-d" else True)(_submit_shortcut(command, carry))
+
+    # Enter on an empty line does nothing, except in the canvas, where it
+    # is the continue.
+    @kb.add("enter", filter=_LINE_BLANK & ~canvas_keys)
+    def _ignore_empty(event: Any) -> None:
+        pass
 
     # Tab always FILLS a pre-selected row. Enter fills it too when
     # anything can follow the row — a parameter, required or optional, or
@@ -256,6 +267,26 @@ def make_bindings(
     def _answer_abort(event: Any) -> None:
         event.app.erase_when_done = True
         event.app.exit(exception=KeyboardInterrupt(), style="class:aborting")
+
+    # Dictation: Ctrl+G starts a recording — and nothing more while one
+    # runs or its text is on its way — Enter and Esc stop it; while the
+    # text is on its way Enter waits, so the line never leaves without
+    # it. Last, so each wins its key.
+    recording = Condition(lambda: dictation.is_recording)
+    writing = Condition(lambda: dictation.is_busy and not dictation.is_recording)
+
+    @kb.add("c-g")
+    def _dictate(event: Any) -> None:
+        dictation.start(event.app)
+
+    @kb.add("enter", filter=recording)
+    @kb.add("escape", filter=recording, eager=True)
+    def _stop_dictating(event: Any) -> None:
+        dictation.stop(event.app)
+
+    @kb.add("enter", filter=writing)
+    def _wait_for_dictation(event: Any) -> None:
+        pass
 
     return kb
 

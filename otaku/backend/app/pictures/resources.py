@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from otaku.backend.app.core.services import App
 from otaku.backend.app.pictures import services as domain_pictures
-from otaku.backend.app.pictures.schemas import Picture
+from otaku.backend.app.pictures.schemas import ServedPicture
 from otaku.backend.base import Resource
 
 
@@ -17,17 +17,17 @@ class PicturesResource(Resource):
         super().__init__(app)
         self.thumbnail = ThumbnailResource(app)
 
-    def get(self, name: str) -> Picture:
+    def get(self, name: str) -> ServedPicture:
         """A stored picture as the model saw it, with its media type,
         under the name its row carries. Raises NotFound when the folder
         has no such file."""
         data, media_type = domain_pictures.get_picture(self._app, name)
-        return Picture(data, media_type)
+        return ServedPicture(data, media_type)
 
 
 class ThumbnailResource(Resource):
     """/pictures/{name}/thumbnail — a stored picture's thumbnail."""
 
-    def get(self, name: str) -> Picture:
+    def get(self, name: str) -> ServedPicture:
         """Its thumbnail, a JPEG, under the same rule."""
-        return Picture(domain_pictures.get_thumbnail(self._app, name), "image/jpeg")
+        return ServedPicture(domain_pictures.get_thumbnail(self._app, name), "image/jpeg")

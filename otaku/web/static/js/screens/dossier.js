@@ -52,7 +52,8 @@ import { thumbs } from "../kit/pictures.js";
 import { typeset } from "../kit/prose.js";
 import { facts, landed, resume, showContextUse } from "../play/shell.js";
 import { lineNodes } from "../play/transcript.js";
-import { cardFieldEditors, inviteCard, openCardWindow, pick } from "./characters.js";
+import { addCharacter, cardFieldEditors, openCardWindow, pick } from "./characters.js";
+import { importCard } from "./transfer.js";
 import { buildTools } from "./tools.js";
 
 /* What a premise may be read from: the two shapes a person keeps prose
@@ -798,9 +799,14 @@ function extractBlock(view, { adding = false } = {}) {
       unread ? `${unread} ${unread === 1 ? "message" : "messages"} not extracted` : "all extracted",
     ),
   );
-  // Two doors into the cast: a card from All characters — or, by its
-  // picker's Import…, from a file — and the pass.
-  const importing = adding ? [actionButton("Add character", { onclick: guard(inviteCard) })] : [];
+  // The doors into the cast: a card from Characters, a card from a file
+  // or a link — and the pass.
+  const importing = adding
+    ? [
+        actionButton("Add character", { onclick: guard(addCharacter) }),
+        actionButton("Import card", { onclick: guard(() => importCard()) }),
+      ]
+    : [];
   const button = element("button", "otk-btn", "Extract now");
   button.type = "button";
   button.dataset.command = "/extract";

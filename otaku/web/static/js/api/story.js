@@ -103,16 +103,24 @@ export const extraction = {
 // ---------- cards ----------
 
 /* Character cards brought into a story, always through the codex: a card's
-   file (`{data, file_name, rename, reuse}`, the bytes as base64) or a codex
-   card (`{card_id, rename}`), vetted for the story and nothing stored —
+   file (`{data, file_name, name, reuse}`, the bytes as base64) or a codex
+   card (`{card_id, name}`), vetted for the story and nothing stored —
    `validateOnly` — or brought in with the `persona` it speaks to and, where
-   `with_pictures` asks, its portrait, played on from the head this page last
-   read. */
+   `with_pictures` asks, its portrait — a file's card in the story alone where
+   `story_only` asks — played on from the head this page last read; and a card
+   from a link (`fetches`, `{url, name}`), vetted the same way, which
+   answers the file the link gave too. */
 export const cards = {
   create: (story, fields, { validateOnly = false } = {}) =>
     validateOnly
       ? post(`/api/stories/${story}/cards?validate_only=true`, fields)
       : post(`/api/stories/${story}/cards`, fields, { moves: story }),
+  fetches: {
+    create: (story, fields, { validateOnly = false } = {}) =>
+      validateOnly
+        ? post(`/api/stories/${story}/cards/fetches?validate_only=true`, fields)
+        : post(`/api/stories/${story}/cards/fetches`, fields, { moves: story }),
+  },
 };
 
 // ---------- context ----------

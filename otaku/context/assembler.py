@@ -74,7 +74,8 @@ from otaku.context.prompt import (
 from otaku.providers import PicturesRide
 from otaku.store import Store
 from otaku.store.files import FileStore
-from otaku.store.schema import Message, Scene, StoryMode
+from otaku.store.schema import Message, Scene
+from otaku.store.story import StoryMode
 
 _DEFAULT_CONTEXT = 8_192  # when the provider states no max context
 # The reply reserve is sized from the story itself: the longest of the
@@ -111,6 +112,8 @@ class PromptTexts(Protocol):
     def recap_header(self) -> str: ...
     @property
     def card_framing(self) -> str: ...  # the card block template, for composing card rows
+    @property
+    def card_empty_framing(self) -> str: ...  # a card's block where none of its fields came up
     @property
     def pinned_header(self) -> str: ...  # opens the pinned rows the recap quotes
     @property
@@ -189,7 +192,7 @@ def assemble_story(
         scenes = store.scenes.get_current(story_id, [m.id for m in messages])
     assembly = _Assembly(
         premise=system,
-        messages=_composed_cards(store, story_id, messages, prompts.card_framing),
+        messages=_composed_cards(store, story_id, messages, prompts),
         scenes=scenes,
         injections=injections,
         tool_set=tool_set,
@@ -430,7 +433,7 @@ class _Assembly:
             pictured = pictured[-1:]
         pictures_of: dict[Message, tuple[WirePicture, ...]] = {}
         for message in pictured:
-            found = (self.files.get(a.file) for a in message.attachments)
+            found = (self.files.get_picture(a.file) for a in message.attachments)
             pictures = tuple(WirePicture(*f) for f in found if f is not None)
             if pictures:
                 pictures_of[message] = pictures
@@ -653,7 +656,7 @@ def _drop_blank(pieces: list[PromptPiece]) -> list[PromptPiece]:
 
 
 def _composed_cards(
-    store: Store, story_id: int | None, messages: list[Message], card_framing: str
+    store: Store, story_id: int | None, messages: list[Message], prompts: PromptTexts
 ) -> list[Message]:
     """The transcript with each card row's wire text composed from its
     character's profile (`cards.card_to_wire`), found through the row's
@@ -666,6 +669,9 @@ def _composed_cards(
     for m in messages:
         who = carded.get(m.speaker_id) if m.kind == "card" and m.speaker_id else None
         if who is not None and who.profile:
-            m = replace(m, body=card_to_wire(who.profile, card_framing, char=who.name))
+            body = card_to_wire(
+                who.profile, prompts.card_framing, prompts.card_empty_framing, char=who.name
+            )
+            m = replace(m, body=body)
         out.append(m)
     return out

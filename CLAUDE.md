@@ -27,10 +27,11 @@ Python 3.11 in the `otaku` conda environment:
     make lint RUN="conda run -n otaku"  # ruff check (Makefile defaults to uv)
     make format RUN=...                  # ruff format
     make typecheck RUN=...               # mypy (strict)
-    make test RUN=...                    # pytest over tests/, the unit suite
-    make scenarios RUN=...               # pytest over scenarios/, but the slow ones — .claude/rules/tests.md
-    make regression RUN=...              # the slow screen scenarios alone
-    make test-model                      # a fake llama.cpp on :8080 — scripts/test_model.py
+    make tests RUN=...                   # pytest over tests/, the unit suite
+    make scenarios RUN=...               # pytest over scenarios/, but the slow ones and the integrations — .claude/rules/tests.md
+    make regressions RUN=...             # the slow screen scenarios alone
+    make integrations RUN=...            # the integrations against the real services
+    make mock-model                      # a mock llama.cpp on :8080 — scripts/mock_model.py
 
 A pytest run outside these targets selects for itself: nothing but `-m`
 leaves the `slow` screen scenarios out, so add `and not slow` to the
@@ -50,8 +51,11 @@ adaptive color falls back). `conda activate` first, or pass
 `--no-capture-output`. Lint, typecheck and the test suites are unaffected;
 only what talks to the terminal is.
 
-The state dir defaults to `~/.otaku`, relocatable via the
-`OTAKU_CONFIG_DIR` env var.
+otaku's home folder is the first set of `OTAKU_HOME`, `OTAKU_DATA_DIR` and
+`OTAKU_CONFIG_DIR` (the older name); else
+a git checkout's own `data/` once it has one, `~/.otaku` where it
+exists, a checkout's `data/`, `~/.otaku` — in that order
+(`backend.app.paths`). This checkout runs on `~/.otaku`, which exists.
 
 ## Architecture
 

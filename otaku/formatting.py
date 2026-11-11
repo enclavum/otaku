@@ -3,6 +3,7 @@ TOML escaping helpers and `render` moved in from the old settings
 package: text functions, not settings.
 """
 
+import json
 import locale
 import re
 from dataclasses import dataclass
@@ -241,6 +242,27 @@ def human_age(t: datetime) -> str:
     if sec < 86400:
         return f"{int(sec // 3600)}h ago"
     return f"{int(sec // 86400)}d ago"
+
+
+def parse_json_object(text: str) -> dict[str, object]:
+    """The JSON object a model answered with: code fences and surrounding
+    prose tolerated by slicing from the first '{' to the last '}' — and
+    JSON whose syntax was typed with typographic double quotes (a small
+    model mirrors a story's own punctuation into `“summary”: “…”`) by
+    retrying with them straightened. Only the retry touches them: an
+    answer that parses keeps every curly quote INSIDE its values
+    verbatim. Raises ValueError for an answer holding no object."""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("no JSON object in reply")
+    sliced = text[start : end + 1]
+    try:
+        obj = json.loads(sliced)
+    except json.JSONDecodeError:
+        obj = json.loads(sliced.replace("“", '"').replace("”", '"'))
+    if not isinstance(obj, dict):
+        raise ValueError("the reply is not a JSON object")
+    return obj
 
 
 def render(template: str, **substitutions: str) -> str:

@@ -30,7 +30,7 @@ make lint typecheck test scenarios RUN="uv run"
 
 There are two suites, with a deliberate division of labor:
 
-- **Unit tests** (`tests/`, `make test`) exist ONLY for pure functions — no disk, network,
+- **Unit tests** (`tests/`, `make tests`) exist ONLY for pure functions — no disk, network,
   database, or terminal. They are written from a module's documented contract, never by reading
   its code, and the tree mirrors the package: `tests/context/test_assembler.py` covers
   `otaku/context/assembler.py`. The one declared exception is

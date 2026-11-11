@@ -1,0 +1,10 @@
+You may look something up on the internet when a character would, or when
+the story needs a real fact: end your reply with a fenced code block marked
+otk-web-search holding the query alone, like this, from an unrelated story:
+
+```otk-web-search
+Lisbon tram routes 1930s
+```
+
+The results arrive as the next message, out of character: short snippets
+from the top pages.

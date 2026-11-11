@@ -12,6 +12,7 @@ fork, truncate — and about the story commands' effects on the store, the
 story the chat plays, and the remembered state.
 """
 
+import contextlib
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +22,7 @@ import pytest
 from otaku.backend.api import Api, Layout, Refused
 from otaku.backend.app.paths import Paths
 from otaku.backend.codex.cards.schemas import RawFile
+from otaku.store.pictures import Attachment
 from otaku.store.schema import Message
 from otaku.terminal.api.prompts import read_prompt
 from otaku.terminal.screens import stories as screen_stories
@@ -154,6 +156,24 @@ class TestStoryBrowser:
         self.pick(app, ENTER + "e" + "!" + CTRL_S + ESC + ESC)
         chain = app.store.stories.get_messages(second)
         assert chain[-1].body == "!" + scripted.CHAT_REPLY
+
+    def test_an_edited_message_is_held_as_saved(self, app: App) -> None:
+        # The browser holds the message the save answered: the preview
+        # draws its segments, which a copy given the new body alone would
+        # keep from before the edit.
+        _first, second = two_stories(app)
+        opened: list[screen_stories.StoryPicker] = []
+
+        def browse() -> tuple[int, str] | None:
+            # built inside the screen's session, so it reads the keys
+            opened.append(screen_stories.StoryPicker(app.api, second))
+            return opened[0].run()
+
+        with contextlib.suppress(EOFError):
+            run_screen(ENTER + "e" + "!" + CTRL_S + ESC + ESC, browse)
+        held = opened[0].msgs[-1]
+        assert held.body == "!" + scripted.CHAT_REPLY
+        assert held == app.api.stories.messages.get(second, held.id)
 
     def test_the_dossier_edits_another_story_s_premise(self, app: App) -> None:
         # Any story opens whole and any story EDITS: drilled into the
@@ -707,7 +727,7 @@ class TestStartWithCards:
     it — and the portraits of the cards asked for on their rows."""
 
     def test_the_cards_come_in_order_and_one_greeting_opens(self, app: App) -> None:
-        quiet = app.api.cards.create(name="Wren").value
+        quiet = app.api.cards.create(name="Wren", description="A face in the crowd.").value
         mira = app.api.cards.create(name="Mira", greeting="Hello, {{user}}.").value
         tallis = app.api.cards.create(name="Tallis", greeting="Who goes?").value
         made = app.api.stories.create(card_ids=(quiet.id, mira.id, tallis.id), persona="Alex").value
@@ -728,8 +748,8 @@ class TestStartWithCards:
         assert made.title == "Wren, Mira, Tallis"  # an untitled one named for them
 
     def test_the_portraits_asked_for_ride_their_rows(self, app: App) -> None:
-        mira = app.api.cards.create(name="Mira").value
-        wren = app.api.cards.create(name="Wren").value
+        mira = app.api.cards.create(name="Mira", description="A face in the crowd.").value
+        wren = app.api.cards.create(name="Wren", description="A face in the crowd.").value
         for card in (mira, wren):
             app.api.cards.pictures.create(card.id, file=RawFile(CAT.read_bytes(), "cat.jpg"))
         made = app.api.stories.create(
@@ -737,11 +757,29 @@ class TestStartWithCards:
         ).value
         first, second = app.store.stories.get_messages(made.id)
         assert first.attachments == ()
-        assert second.attachments == app.api.cards.get(wren.id).pictures
+        assert second.attachments == tuple(
+            Attachment.of(p) for p in app.api.cards.get(wren.id).pictures
+        )
+
+    def test_a_card_with_no_text_but_a_picture_starts_one(self, app: App) -> None:
+        made = app.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg", name="Whiskers")
+        whiskers = made.value.card
+        story = app.api.stories.create(
+            card_ids=(whiskers.id,), card_pictures=(whiskers.id,), persona="you"
+        ).value
+        (character,) = app.store.characters.list(story.id)
+        assert character.card_id == whiskers.id
+
+    def test_a_card_with_neither_text_nor_a_picture_is_refused(self, app: App) -> None:
+        nobody = app.api.cards.create(name="Nobody").value
+        before = len(app.api.stories.list())
+        with pytest.raises(Refused):
+            app.api.stories.create(card_ids=(nobody.id,), persona="you")
+        assert len(app.api.stories.list()) == before
 
     def test_a_pick_one_story_cannot_hold_is_refused_and_nothing_is_made(self, app: App) -> None:
-        mira = app.api.cards.create(name="Mira").value
-        twin = app.api.cards.create(name="Mira").value
+        mira = app.api.cards.create(name="Mira", description="A face in the crowd.").value
+        twin = app.api.cards.create(name="Mira", description="A face in the crowd.").value
         before = len(app.api.stories.list())
         for picked in ((mira.id, mira.id), (mira.id, twin.id), (mira.id, 999)):
             with pytest.raises(Refused):
@@ -749,7 +787,7 @@ class TestStartWithCards:
         assert len(app.api.stories.list()) == before
 
     def test_a_fork_keeps_its_characters_links(self, app: App) -> None:
-        mira = app.api.cards.create(name="Mira").value
+        mira = app.api.cards.create(name="Mira", description="A face in the crowd.").value
         made = app.api.stories.create(card_ids=(mira.id,), persona="you").value
         fork = app.api.stories.forks.create(made.id).value
         (character,) = app.store.characters.list(fork.id)

@@ -1,4 +1,7 @@
-"""The data model: the DDL, its semantics, and the row types.
+"""The data model's tables: the DDL, its semantics, and a row type for
+each table. What a row carries beyond its scalars is beside it: its
+pictures (`store.pictures`), and a story's settings and the modes its
+layout derives (`store.story`).
 
 Always the CURRENT shape: a fresh database is created from it directly,
 and `store.migrations` brings old databases to it. The semantics ride in
@@ -14,13 +17,12 @@ setting is that table's when it is a text that may need sealing — a
 config file is never sealed — and a config file's otherwise.
 """
 
-import json
-from collections.abc import Sequence
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Self
+from dataclasses import dataclass
 
-SCHEMA_VERSION = "14"
+from otaku.store.pictures import Attachment, CardPicture, CardPictureKind
+from otaku.store.story import StoryMode, StorySettingDB
+
+SCHEMA_VERSION = "15"
 
 SCHEMA_DDL = """
 -- ---------- the codex: what every story may draw on ----------
@@ -33,11 +35,12 @@ CREATE TABLE cards (
     aliases    BLOB,                     -- JSON array, sealed
     tagline    BLOB,                     -- one line for the reader; never sent to the model
     profile    BLOB,                     -- the card's profile as TOML, the name left to `name`; macros unbound
-    pictures   TEXT,                     -- its pictures as a JSON list, see Attachment; the first the portrait; NULL when none
+    pictures   TEXT,                     -- its pictures as a JSON list, see CardPicture; its portraits first, the first the main one; NULL when none
     digests    TEXT,                     -- the card files it was made from, as a JSON list; NULL when none
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    position   INTEGER NOT NULL DEFAULT 0 -- the reader's order, 0 first; a card made goes last
+    position   INTEGER NOT NULL DEFAULT 0, -- the reader's order, 0 first; a card made goes last
+    original_file TEXT                   -- the card file it was imported from, kept as it came: its name in the files folder; NULL for none
 );
 
 -- ---------- source: what was actually said ----------
@@ -182,17 +185,29 @@ CREATE INDEX idx_token_usage_story ON token_usage (story_id);
 class Card:
     """A character card in the codex: a character as the reader keeps it
     across stories. `profile` is the card's text as the TOML
-    `context.cards` writes and reads; the first of the pictures is the
-    portrait; `digests` name the card files it was made from."""
+    `context.cards` writes and reads; its pictures are its portraits
+    first, the first the main one, then whatever else its card file
+    brought, each of its kind; `digests` name the card files it was made
+    from, and `original_file` the one it was imported from, kept as it
+    came: its name in the files folder (None for none)."""
 
     id: int
     name: str
     aliases: tuple[str, ...] = ()
     tagline: str = ""
     profile: str = ""
-    pictures: tuple["Attachment", ...] = ()  # the files folder holds the bytes
+    pictures: tuple[CardPicture, ...] = ()  # the files folder holds the bytes
     digests: tuple[str, ...] = ()
+    original_file: str | None = None
     updated_at: str = ""  # audit column, surfaced for display alone
+
+    @property
+    def portraits(self) -> tuple[CardPicture, ...]:
+        """The pictures of the character itself, in order, the first the
+        main one — what every story and both frontends show of a card."""
+        return tuple(
+            picture for picture in self.pictures if picture.kind is CardPictureKind.PORTRAIT
+        )
 
 
 @dataclass(frozen=True)
@@ -203,7 +218,7 @@ class Story:
     head_id: int | None
     forked_from_id: int | None
     forked_from_message_id: int | None  # the cut, in the story forked from
-    settings: tuple["StorySettingDB", ...] = ()  # what the story has stored, see StorySettingDB
+    settings: tuple[StorySettingDB, ...] = ()  # what the story has stored, see StorySettingDB
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -222,10 +237,9 @@ class Message:
     # who made it: an engine, 'card', a tool's name; None on the reader's own
     provider: str | None = None
     model: str | None = None
-    attachments: tuple["Attachment", ...] = ()  # the files folder holds the bytes
+    attachments: tuple[Attachment, ...] = ()  # the files folder holds the bytes
     # the layout's mode it was recorded in, read by the join rule; a
-    # factory, as StoryMode is defined below
-    mode: "StoryMode" = field(default_factory=lambda: StoryMode.CHAT)
+    mode: StoryMode = StoryMode.CHAT
     pinned: bool = False  # the reader's mark: sent whole even where its scene is summarized
 
     # ---- derived: counted when the row is read, never stored ----
@@ -280,230 +294,3 @@ class Journal:
     updated_at: str = ""  # audit column, surfaced for display alone
     provider: str | None = None  # who made the row (see the DDL)
     model: str | None = None
-
-
-# ---------- what the rows carry, in the order the rows reference it ----------
-
-
-@dataclass(frozen=True)
-class StorySettingDB:
-    """One setting of a story, as the `settings` column records it: a
-    switch, where what it injects rides, the story's own reminder,
-    whether the reader is shown the notes the model writes, and the
-    layout the story is read in — the last three each one setting's, the
-    others every injecting setting's.
-    WHICH settings there are, and what each may take, is no business of
-    the column's (`backend.story.settings.services`)."""
-
-    name: str
-    enabled: bool = False
-    position: "InjectionPosition | None" = None  # None: unsaid, the setting's default applies
-    reminder_text: str = ""
-    display_notes: bool = True
-    layout: "Layout | None" = None  # None: unsaid, the setting's default applies
-
-    @classmethod
-    def from_json(cls, text: str) -> tuple[Self, ...]:
-        """The column read back: every setting it holds, in its order.
-        What makes no sense reads as unsaid — `enabled` that is not `true`
-        is False, a position that is not "system" or a count from 1 is
-        None, a layout that is none of the four names is None — and a
-        text that is no JSON object of objects holds none."""
-        out = []
-        for name, state in cls._parse(text).items():
-            if not isinstance(state, dict):
-                continue
-            reminder_text = state.get("reminder_text")
-            out.append(
-                cls(
-                    name=name,
-                    enabled=state.get("enabled") is True,
-                    position=InjectionPosition.from_value(state.get("position")),
-                    reminder_text=reminder_text if isinstance(reminder_text, str) else "",
-                    display_notes=state.get("display_notes") is not False,
-                    layout=Layout.from_value(state.get("layout")),
-                )
-            )
-        return tuple(out)
-
-    @classmethod
-    def to_json(cls, settings: Sequence[Self], current: str = "") -> str:
-        """The column's text with these settings in it — a MERGE over
-        `current`, never a rewrite: a JSON key bumps no schema version, so
-        an older build can meet a newer one's keys and must hand them back
-        whole. Only what is said is written; an emptied reminder leaves
-        the column."""
-        column = cls._parse(current)
-        for setting in settings:
-            state = column.get(setting.name)
-            state = dict(state) if isinstance(state, dict) else {}
-            state["enabled"] = setting.enabled
-            if setting.position is not None:
-                state["position"] = setting.position.value
-            if setting.reminder_text:
-                state["reminder_text"] = setting.reminder_text
-            else:
-                state.pop("reminder_text", None)
-            if setting.display_notes:
-                state.pop("display_notes", None)  # the default; only the exception is said
-            else:
-                state["display_notes"] = False
-            if setting.layout is not None:
-                state["layout"] = setting.layout.value
-            column[setting.name] = state
-        return json.dumps(column, ensure_ascii=False)
-
-    @staticmethod
-    def _parse(text: str) -> dict[str, object]:
-        """The column's text parsed: the JSON object it holds, or an empty
-        dict for anything else — nothing, garbage, a list."""
-        try:
-            parsed = json.loads(text) if text else {}
-        except ValueError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-
-
-@dataclass(frozen=True)
-class InjectionPosition:
-    """Where an injected text rides: before the reader's `depth`-th
-    message from the end (1 the newest), or, with no depth, in the
-    system message. `value` is the plain form the column and the wire
-    hold — "system" or the number — and `from_value` reads one back;
-    `text` names it as every frontend does ("system", "2nd last" for 1:
-    the reader's newest message is the last; the page copies the rule
-    in `tools.js placeName`)."""
-
-    depth: int | None = None
-
-    @property
-    def value(self) -> str | int:
-        return "system" if self.depth is None else self.depth
-
-    @property
-    def text(self) -> str:
-        if self.depth is None:
-            return "system"
-        nth = self.depth + 1
-        return f"{nth}{'nd' if nth == 2 else 'rd' if nth == 3 else 'th'} last"
-
-    @classmethod
-    def from_value(cls, value: object) -> Self | None:
-        """ "system" or an int from 1 (by type: True is not one); else None."""
-        if value == "system":
-            return cls()
-        return cls(value) if type(value) is int and value >= 1 else None
-
-
-class Layout(Enum):
-    """How a story is laid out — read, and for one value written: the
-    same turns four ways, the choice the story's. NOVEL is the canvas
-    over the TEXT wire, the model continuing the text itself; CANVAS one
-    continuous text over the chat wire; MANUSCRIPT the played lines as
-    interjections among the prose; CHAT the turns as alternating blocks.
-    Two facts derive from it, and the frontends read the facts: the
-    mode it is written in (`mode`) and the wire (`completion_type`).
-    `value` is the plain form the column and the wire hold, and
-    `from_value` reads one back."""
-
-    NOVEL = "novel"
-    CANVAS = "canvas"
-    MANUSCRIPT = "manuscript"
-    CHAT = "chat"
-
-    @classmethod
-    def from_value(cls, value: object) -> Self | None:
-        """One of the four names; else None."""
-        return next((each for each in cls if each.value == value), None)
-
-    @property
-    def mode(self) -> "StoryMode":
-        """STORY for the canvas, one text, and the novel, which is drawn
-        as the canvas; CHAT for the manuscript and the chat."""
-        return StoryMode.STORY if self in (Layout.CANVAS, Layout.NOVEL) else StoryMode.CHAT
-
-    def completion_type(self, can_complete_text: bool) -> "CompletionType":
-        """The wire alone: TEXT for the novel where the model in use can
-        complete text (`ModelFacts.can_complete_text`), CHAT for every other
-        case — a novel on a model that cannot is played as a canvas."""
-        if self is Layout.NOVEL and can_complete_text:
-            return CompletionType.TEXT
-        return CompletionType.CHAT
-
-
-class StoryMode(Enum):
-    """The mode a story is written in: STORY one text, the reader's lines
-    and the model's replies running on into each other; CHAT turns, each
-    a paragraph of its own. A layout has one (`Layout.mode`), and
-    `messages.mode` holds the one a row was written in — how it joins
-    the text is decided off that (`context.assembler.get_join_type`)."""
-
-    STORY = "story"
-    CHAT = "chat"
-
-    @classmethod
-    def from_value(cls, value: object) -> "StoryMode":
-        """The stored word; CHAT for anything this build does not know."""
-        return next((each for each in cls if each.value == value), cls.CHAT)
-
-
-class CompletionType(Enum):
-    """The wire a request goes over — CHAT the message list, TEXT the raw
-    text."""
-
-    CHAT = "chat"
-    TEXT = "text"
-
-
-@dataclass(frozen=True)
-class Attachment:
-    """One picture on a turn, as the `attachments` column records it: the
-    app's facts about a file in the folder beside the database, none of
-    the reader's words — which is why the column is plain where the file
-    is sealed. `file` is the file's name in the folder, extension
-    included (`store.files` draws it; the extension says the type), the
-    rest their measure as the model sees them — recorded here so that no
-    reader has to open a sealed file to describe a picture. The reader's
-    original file name is not kept: nothing needs it once the picture
-    is in."""
-
-    file: str
-    width: int
-    height: int
-    size: int
-
-    @classmethod
-    def from_json(cls, text: str | None) -> tuple[Self, ...]:
-        """The column read back; NULL → no pictures, which is also what a
-        row written before the column existed reads as."""
-        if not text:
-            return ()
-        return tuple(
-            cls(
-                file=str(item["file"]),
-                width=int(item["width"]),
-                height=int(item["height"]),
-                size=int(item["size"]),
-            )
-            for item in json.loads(text)
-        )
-
-    @classmethod
-    def to_json(cls, attachments: Sequence[Self]) -> str | None:
-        """The column's text for these pictures: a JSON list, or NULL (None)
-        for a turn without any — the column never holds an empty list
-        pretending to be absent. The keys are a contract with the SQL that
-        reads the column back (`$.file` is what the sweep extracts)."""
-        if not attachments:
-            return None
-        return json.dumps(
-            [
-                {
-                    "file": a.file,
-                    "width": a.width,
-                    "height": a.height,
-                    "size": a.size,
-                }
-                for a in attachments
-            ]
-        )

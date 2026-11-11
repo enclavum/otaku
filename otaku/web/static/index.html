@@ -25,7 +25,7 @@
 <script>try { var t = localStorage.getItem("otaku-theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <link rel="stylesheet" href="app.css">
 <!-- The reader's own styles, loaded last so anything in them wins. Served from
-     the state dir (web/custom.css); an empty stylesheet when there is none. -->
+     the home folder (web/custom.css); an empty stylesheet when there is none. -->
 <link rel="stylesheet" href="custom.css">
 </head>
 <body>
@@ -38,7 +38,7 @@
 <div class="otk-app">
   <nav class="otk-spine" aria-label="Application">
     <span class="otk-spine__mark"></span>
-    <div class="otk-spine__name"><span>otaku · <span data-fact="version"></span> · a roleplay client</span></div>
+    <div class="otk-spine__name"><span>otaku · <span data-fact="version"></span> · a roleplay app</span></div>
     <button type="button" class="otk-spine__toggle" id="otk-rail-toggle" aria-controls="otk-rail" aria-expanded="false">contents</button>
     <!-- the theme switch: sun above, moon below, the knob between; the words
          are drawn, the state is on <html> (docs/web_tokens.md) -->
@@ -152,6 +152,18 @@
           <div class="otk-composer__input">
             <label class="otk-label" for="otk-msg" hidden>Your next turn</label>
             <textarea id="otk-msg" rows="1" placeholder="Write what happens next&hellip;"></textarea>
+            <!-- DICTATION. While the composer has data-dictating="true" a level and
+                 the elapsed time sit at the end of the writing line. Nothing is
+                 transcribed until listening stops, so the line holds only what the
+                 reader typed before clicking the mic, or its placeholder.
+                 TRANSCRIBING. data-dictating="transcribing" after the mic is clicked
+                 again, until the text arrives: the listening widget stays in place,
+                 the same nine bars turn grey and a single peak travels across
+                 them. The typed text stays. Driven by dictation.js. -->
+            <div class="otk-dictation" role="status" aria-label="Listening">
+              <span class="otk-dictation__level" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="otk-dictation__time">0:00</span>
+            </div>
           </div>
           <div class="otk-composer__verbs">
             <!-- Send while the box is the reader's, Stop while the model has
@@ -165,6 +177,10 @@
             <!-- the pictures door, a clip at Send's left: shown only while the
                  model in use can see (the facts' `can_attach`) -->
             <button type="button" class="otk-attach-btn" data-attach aria-label="Attach pictures" title="Attach pictures" hidden><svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true"><path d="M13.6 7.2 8.1 12.7a3.4 3.4 0 0 1-4.8-4.8l6-6a2.2 2.2 0 0 1 3.1 3.1l-6 6a1 1 0 0 1-1.4-1.4l5.3-5.3" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+            <!-- the microphone, beside the clip: a click starts, another stops, and
+                 what was said is written into the box; shown while a model is
+                 saved for dictation (the facts' `can_dictate`) -->
+            <button type="button" class="otk-mic-btn" data-dictate aria-label="Dictate" title="Dictate" hidden><svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true"><rect class="otk-mic-btn__capsule" x="5.6" y="1.6" width="4.8" height="8.2" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.05"></rect><path d="M3.4 7.6a4.6 4.6 0 0 0 9.2 0M8 12.2v2.3M5.9 14.5h4.2" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round"></path></svg></button>
             <button type="button" class="otk-btn otk-btn--primary" data-send>Send</button>
             <button type="button" class="otk-btn otk-btn--stop" data-stop hidden><span class="otk-btn__square"></span> Stop</button>
             <button type="button" class="otk-btn otk-btn--quiet" data-turn="regen">Regen</button>
@@ -191,12 +207,11 @@
 
 <!-- level 1: every story -->
 <dialog class="otk-panel" data-popup="/stories" aria-label="Stories">
-  <header class="otk-panel__head otk-panel__head--centered">
+  <header class="otk-panel__head">
     <span class="otk-eyebrow">Stories</span>
-    <span class="otk-panel__middle">
-      <button type="button" class="otk-btn" data-command="/new">New</button>
-      <button type="button" class="otk-btn" data-command="/import">Import</button>
-    </span>
+    <span class="otk-push"></span>
+    <button type="button" class="otk-btn" data-command="/new">New story</button>
+    <button type="button" class="otk-btn" data-command="/import">Import story</button>
     <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
   </header>
 
@@ -223,9 +238,9 @@
      a list or a gallery at three tile sizes (`data-view`), and the stories'
      unlinked characters in a column that folds (`data-unlinked`); an open
      card is a sheet over it, below. Built by `characters.js`. -->
-<dialog class="otk-panel otk-panel--wide otk-panel--chars" data-popup="/characters" aria-label="All characters">
+<dialog class="otk-panel otk-panel--wide otk-panel--chars" data-popup="/characters" aria-label="Characters">
   <header class="otk-panel__head">
-    <span class="otk-eyebrow">All characters</span>
+    <span class="otk-eyebrow">Characters</span>
     <!-- the list, or the gallery at each tile size -->
     <span class="otk-seg" role="group" aria-label="View">
       <button type="button" class="otk-seg__btn otk-seg__btn--glyph" data-view="list" aria-pressed="false" title="list" aria-label="list"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4"><line x1="1.5" y1="3.5" x2="14.5" y2="3.5"/><line x1="1.5" y1="8" x2="14.5" y2="8"/><line x1="1.5" y1="12.5" x2="14.5" y2="12.5"/></g></svg></button>
@@ -234,6 +249,7 @@
       <button type="button" class="otk-seg__btn otk-seg__btn--glyph" data-view="large" aria-pressed="false" title="large" aria-label="large"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" fill="currentColor"/></svg></button>
     </span>
     <span class="otk-push"></span>
+    <button type="button" class="otk-btn" data-import-cards>Import cards</button>
     <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
   </header>
 
@@ -266,7 +282,7 @@
 </dialog>
 
 <!-- the open card, and an unlinked story character read before linking it:
-     each a window of its own over All characters, filled when one opens
+     each a window of its own over Characters, filled when one opens
      (`characters.js`) -->
 <dialog class="otk-sheet otk-sheet--card" data-sheet="card"></dialog>
 <dialog class="otk-sheet otk-sheet--unlinked" data-sheet="unlinked"></dialog>
@@ -365,6 +381,7 @@
 
   <div class="otk-tabs" role="tablist">
     <button type="button" class="otk-tab" role="tab" data-tab="models">Models</button>
+    <button type="button" class="otk-tab" role="tab" data-tab="dictation">Dictation</button>
     <button type="button" class="otk-tab" role="tab" data-tab="providers">Providers</button>
     <span class="otk-tabs__aside" data-tabs-aside></span>
   </div>
@@ -497,6 +514,8 @@
   <div class="otk-lightbox__foot">
     <span class="otk-lightbox__count"></span>
     <span class="otk-lightbox__meta"></span>
+    <!-- the picture alone, in a new tab: `kit/pictures.js` points it at the file -->
+    <a class="otk-lightbox__open" target="_blank" rel="noopener" title="Open the picture in a new tab" aria-label="Open the picture in a new tab"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></a>
     <button type="button" class="otk-btn" data-close>Close <span class="otk-btn__key">esc</span></button>
   </div>
 </dialog>
@@ -615,7 +634,7 @@
     <label class="otk-label" for="otk-start-name">title</label>
     <input class="otk-field" id="otk-start-name" type="text" placeholder="optional">
     <label class="otk-label" for="otk-start-persona">persona name</label>
-    <input class="otk-field" id="otk-start-persona" type="text" placeholder="who you play" required>
+    <input class="otk-field" id="otk-start-persona" type="text" placeholder="who you play, the card's {{user}}" required>
   </div>
   <div class="otk-v otk-v--sm" data-start-pictures>
     <span class="otk-label" data-start-caption></span>
@@ -623,6 +642,46 @@
   <div class="otk-dialog__foot">
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="start">Start</button>
+  </div>
+</dialog>
+
+<!-- Add a character: a card from Characters into the story held, in one
+     step — the cards named in a list, the one picked previewed beside it,
+     its name in this story and the persona it speaks to. A card in the
+     story already, or with no text yet, is listed but can't be picked.
+     Built by `characters.addCharacter`. -->
+<dialog class="otk-dialog otk-dialog--import otk-dialog--pick" data-dialog="add-character" aria-labelledby="otk-add-title">
+  <span class="otk-eyebrow" id="otk-add-title">Add a character</span>
+  <div class="otk-pick">
+    <div class="otk-pick__side">
+      <div class="otk-pick__list" role="listbox" aria-label="Cards" data-add-list></div>
+      <input class="otk-filter" type="search" placeholder="filter cards" aria-label="Filter cards" data-add-filter>
+    </div>
+    <div class="otk-pick__right">
+      <div class="otk-pick__preview" data-add-preview>
+        <span class="otk-pick__portrait" data-add-portrait></span>
+        <div class="otk-pick__about">
+          <span class="otk-pick__title" data-add-title></span>
+          <span class="otk-pick__tag" data-add-tag></span>
+          <div class="otk-pick__desc otk-md" data-add-desc></div>
+        </div>
+      </div>
+      <div class="otk-imp__block">
+        <div class="otk-field-row otk-field-row--card">
+          <label class="otk-label" for="otk-add-name">character name</label>
+          <input class="otk-field" id="otk-add-name" type="text" required>
+          <label class="otk-label" for="otk-add-persona">persona name</label>
+          <input class="otk-field" id="otk-add-persona" type="text" placeholder="who you play, the card's {{user}}" required>
+        </div>
+        <!-- only when the card has a picture -->
+        <div class="otk-imp__switch" data-add-picsend hidden><span class="otk-picsend__text">Send the picture along with the card to the context</span><button type="button" class="otk-switch otk-switch--h" role="switch" aria-checked="false" aria-label="Send the picture along with the card to the context" data-add-picsend-switch><span class="otk-switch__knob"></span></button></div>
+      </div>
+    </div>
+  </div>
+  <div class="otk-dialog__foot">
+    <span class="otk-push"></span>
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="invite">Invite</button>
   </div>
 </dialog>
 
@@ -635,7 +694,6 @@
   <label class="otk-label" for="otk-filter-pick" hidden>Filter</label>
   <input class="otk-filter" id="otk-filter-pick" type="search" placeholder="filter cards" data-filter-pick>
   <div class="otk-dialog__foot">
-    <button type="button" class="otk-btn otk-btn--lead" data-choice="import">Import&hellip;</button>
     <span class="otk-push"></span>
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="choose">Choose</button>
@@ -662,6 +720,20 @@
   <div class="otk-dialog__foot">
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="confirm" autofocus></button>
+  </div>
+</dialog>
+
+<!-- a card's generated text, asked about as its window is put down: kept
+     (Save), the card put back as it stood before the first generation
+     (Revert), or the window kept open on it (Close, Esc). Driven by
+     characters.js. -->
+<dialog class="otk-dialog" data-dialog="keep-generated" aria-labelledby="otk-keep-generated-title">
+  <span class="otk-eyebrow" data-title id="otk-keep-generated-title">Keep the generated card?</span>
+  <p class="otk-dialog__body">The previous version will be discarded.</p>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel">Close</button>
+    <button type="button" class="otk-btn" data-choice="revert">Revert</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="save" autofocus>Save</button>
   </div>
 </dialog>
 
@@ -709,46 +781,98 @@
   </div>
 </dialog>
 
-<dialog class="otk-dialog" data-dialog="card" aria-labelledby="otk-card-title">
-  <span class="otk-eyebrow" data-title id="otk-card-title">Import</span>
+<!-- Import card: one card into the open story, saved to Characters too.
+     The card is read as soon as it is dropped, chosen or pasted, and the
+     fields fill in. Built by `transfer.importCard`. -->
+<dialog class="otk-dialog otk-dialog--import" data-dialog="card" aria-labelledby="otk-card-title">
+  <span class="otk-eyebrow" id="otk-card-title">Import card</span>
 
-  <!-- STATE: .is-dragover while a file is over it, .is-filled once dropped.
-       It takes the focus so no text field does: the dialog opens on the
-       question it is asking — which file — and not with a caret blinking
-       in a rename nobody asked for. -->
-  <label class="otk-dropzone" for="otk-card-file" tabindex="-1" autofocus>
-    <span class="otk-dropzone__file" data-file hidden></span>
-    <span class="otk-dropzone__label">Drop a PNG or JSON card here</span>
-    <span class="otk-label otk-label--accent">or choose a file</span>
-    <input id="otk-card-file" type="file" accept=".png,.json" hidden>
-  </label>
-  <!-- a codex card brought in instead of a file: where the file would be -->
-  <div class="otk-chosen" data-chosen hidden></div>
+  <div class="otk-imp__source" data-source>
+    <!-- STATE: .is-dragover while a file is over it, .is-filled once one
+         is in. It takes the focus, so the dialog opens on the question it
+         asks — which card — and not with a caret in a name field. -->
+    <label class="otk-dropzone otk-dropzone--slim" for="otk-card-file" tabindex="-1" autofocus>
+      <span class="otk-dropzone__file" data-file hidden></span>
+      <span class="otk-dropzone__label">Drop a card file here</span>
+      <span class="otk-label otk-label--accent">or choose a file</span>
+      <input id="otk-card-file" type="file" accept=".png,.json,.charx" hidden>
+    </label>
+    <div class="otk-imp__group">
+      <span class="otk-imp__labelrow"><span class="otk-label">or paste a link</span><button class="otk-sites__toggle" type="button" aria-expanded="false" popovertarget="otk-sites-card" data-sites>supported sites</button></span>
+      <!-- a popover, over the dialog: the hosts a card's page is fetched from, drawn as rows before the note (`transfer.wireSupportedSites`) -->
+      <div class="otk-sites" id="otk-sites-card" role="dialog" aria-label="Supported sites" popover>
+        <span class="otk-label otk-sites__head">supported sites</span>
+        <p class="otk-sites__note">Or any direct link to a .png or .json card file.</p>
+      </div>
+      <input class="otk-field otk-field--mono" type="text" spellcheck="false" aria-label="Card link" placeholder="a card page, or a link to a card file" data-link>
+    </div>
+  </div>
 
   <div class="otk-field-row otk-field-row--card">
-    <label class="otk-label" for="otk-card-name">import as</label>
-    <input class="otk-field" id="otk-card-name" type="text" placeholder="optional rename">
-    <label class="otk-label" for="otk-card-persona">user name</label>
-    <input class="otk-field" id="otk-card-persona" type="text" placeholder="who you play" required>
+    <label class="otk-label" for="otk-card-name">character name</label>
+    <input class="otk-field" id="otk-card-name" type="text" required>
+    <label class="otk-label" for="otk-card-persona">persona name</label>
+    <input class="otk-field" id="otk-card-persona" type="text" placeholder="who you play, the card's {{user}}" required>
   </div>
-  <p class="otk-note" data-persona-note hidden>The card writes to <span class="otk-code">{{user}}</span>; whatever is here replaces it.</p>
 
-  <!-- a card of the same name already in the codex: this file IS that card,
-       or a new one -->
-  <span class="otk-label" data-similar-label hidden>Already in All characters?</span>
-  <div class="otk-choices" role="radiogroup" data-similar hidden></div>
+  <!-- only when Characters has a card like this one, by name or picture:
+       on, the card is saved to Characters beside it, linked; off, it stays
+       in this story alone, its character among the unlinked ones -->
+  <div class="otk-imp__block" data-similar hidden>
+    <span class="otk-label">Characters has a card like this one</span>
+    <div class="otk-v otk-v--sm" data-similar-cards></div>
+    <div class="otk-imp__switch"><span class="otk-picsend__text">Save to Characters anyway</span><button type="button" class="otk-switch otk-switch--h" role="switch" aria-checked="true" aria-label="Save to Characters anyway" data-save-switch><span class="otk-switch__knob"></span></button></div>
+  </div>
 
   <!-- only when the card carries a picture -->
-  <div class="otk-picsend" data-picsend hidden><span class="otk-picsend__thumb" data-picsend-thumb></span><span class="otk-picsend__text">Send the picture to the context</span><button type="button" class="otk-switch otk-switch--h" role="switch" aria-checked="false" aria-label="Send the picture to the context" data-picsend-switch><span class="otk-switch__knob"></span></button></div>
+  <div class="otk-imp__block" data-picsend hidden><div class="otk-imp__switch"><span class="otk-picsend__text">Send the picture along with the card to the context</span><button type="button" class="otk-switch otk-switch--h" role="switch" aria-checked="false" aria-label="Send the picture along with the card to the context" data-picsend-switch><span class="otk-switch__knob"></span></button></div></div>
 
-  <span class="otk-label" data-outcomes-label hidden>This import will</span>
-  <div class="otk-outcomes" data-outcomes hidden></div>
-  <p class="otk-note" data-card-note hidden></p>
+  <div class="otk-imp__block" data-outcomes hidden>
+    <span class="otk-label">this import will</span>
+    <ul class="otk-imp__will" data-will></ul>
+    <p class="otk-note" data-card-note hidden></p>
+  </div>
 
   <div class="otk-dialog__foot">
-    <span class="otk-dialog__escape" data-card-escape>joins the current story</span>
+    <span class="otk-push"></span>
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="import">Import</button>
+  </div>
+</dialog>
+
+<!-- Import cards: card files and links into Characters, several at once.
+     Each is read as it arrives, one row of the list (`data-state`: reading,
+     ready, similar, duplicate, refused, added); Import adds the ready and
+     the similar ones, and the foot then holds Close alone (`characters.js`) -->
+<dialog class="otk-dialog otk-dialog--import" data-dialog="cards" aria-labelledby="otk-cards-title">
+  <span class="otk-eyebrow" id="otk-cards-title">Import cards</span>
+  <!-- STATE: .is-dragover while files are over it. It takes the focus, as
+       the card dialog's does. -->
+  <label class="otk-dropzone otk-dropzone--slim" for="otk-cards-files" tabindex="-1" autofocus>
+    <span class="otk-dropzone__label">Drop card files or pictures here</span>
+    <span class="otk-label otk-label--accent">or choose files</span>
+    <input id="otk-cards-files" type="file" accept=".png,.json,.charx,image/*" multiple hidden>
+  </label>
+  <div class="otk-imp__group">
+    <span class="otk-imp__labelrow"><span class="otk-label">or paste links · one per line</span><button class="otk-sites__toggle" type="button" aria-expanded="false" popovertarget="otk-sites-cards" data-sites>supported sites</button></span>
+    <!-- a popover, over the dialog: the hosts a card's page is fetched from, drawn as rows before the note (`transfer.wireSupportedSites`) -->
+    <div class="otk-sites" id="otk-sites-cards" role="dialog" aria-label="Supported sites" popover>
+      <span class="otk-label otk-sites__head">supported sites</span>
+      <p class="otk-sites__note">Or any direct link to a .png or .json card file.</p>
+    </div>
+    <textarea class="otk-field otk-field--mono otk-imp__textarea" rows="4" wrap="off" spellcheck="false" aria-label="Links, one per line" placeholder="a card page, or a link to a card file" data-links></textarea>
+  </div>
+  <ul class="otk-imp__list" aria-live="polite" data-rows hidden></ul>
+  <div class="otk-dialog__foot" data-before>
+    <span class="otk-imp__count" data-count></span>
+    <span class="otk-push"></span>
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="import" data-import>Import</button>
+  </div>
+  <div class="otk-dialog__foot" data-after hidden>
+    <span class="otk-imp__count" data-count-after></span>
+    <span class="otk-push"></span>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="cancel" data-done>Close</button>
   </div>
 </dialog>
 

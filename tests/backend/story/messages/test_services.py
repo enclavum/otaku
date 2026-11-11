@@ -17,7 +17,8 @@ from otaku.backend.story.messages.services import (
     tool_label,
 )
 from otaku.context.assembler import JoinType
-from otaku.store.schema import Layout, Message, StoryMode
+from otaku.store.schema import Message
+from otaku.store.story import Layout, StoryMode
 
 STORY = StoryMode.STORY
 QUESTIONS = frozenset({"question"})

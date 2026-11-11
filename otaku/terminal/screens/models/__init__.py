@@ -13,6 +13,9 @@ panel naming what is still loading. The user can:
     - toggle load state with `l`/`u` (a confirm dialog, then a spinner)
     - pin lore extraction to the highlighted model with `x`, or on the
       model pinned, unpin it; executed at once, the mark the answer
+    - switch the list to the dictation models with `d`, and back; there
+      Enter pins dictation to the highlighted model, or on the model
+      pinned unpins it, as `x` does extraction's, and `x` is gone
     - press Enter to pick the highlighted model — the switch is EXECUTED
       here (`api.app.update`, the screens' one ownership
       rule) and its notice returned. A model that is not loaded yet is
@@ -21,8 +24,9 @@ panel naming what is still loading. The user can:
 
 Loaded models render bold; not-loaded muted. The story's model reads
 "[ writing ]" against its figures and the one saved for extraction
-"[ extraction ]", both on a model that is both. The cursor restores to the last-used model
-on open. A provider without load/unload serves its models
+"[ extraction ]", both on a model that is both; among the dictation
+models, the one saved for dictation reads "[ dictation ]". The cursor
+restores to the last-used model on open. A provider without load/unload serves its models
 statically: they all show as loaded, Enter picks them directly, and the
 l/u keys (and their help entries) disappear on such a row.
 
@@ -65,7 +69,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
-from otaku.terminal.api import Api
+from otaku.terminal.api import Api, ModelKind, ModelRole
 from otaku.terminal.api import app as api_app
 from otaku.terminal.screens.base import base_style, bordered_box, text_line
 from otaku.terminal.screens.models.models import ModelList
@@ -79,8 +83,10 @@ class ModelPicker(ModelList, ProviderPanel):
     panel, with the header, the help and the layout that hold the two."""
 
     def _header_text(self) -> StyleAndTextTuples:
-        n, total = len(self.filtered), len(self.all)
-        left = f" Models ({n} of {total})" if n != total else f" Models ({n})"
+        n = len(self.filtered)
+        total = sum(1 for e in self.all if self.view in e.kinds)
+        caption = "Models" if self.view is ModelKind.COMPLETION else "Dictation models"
+        left = f" {caption} ({n} of {total})" if n != total else f" {caption} ({n})"
         # What is still loading is said in the provider panel, on the row
         # of the provider it is about (see `_providers_text`).
         head: StyleAndTextTuples = [("class:header", left)]
@@ -105,14 +111,25 @@ class ModelPicker(ModelList, ProviderPanel):
             # supports them.
             if self.filtered and self.filtered[self.cursor].can_manage:
                 segments += ["l load", "u unload"]
-            if self.filtered:
-                # On the model pinned for extraction, the way back to the
-                # story's model; on any other, the pin.
-                if self.filtered[self.cursor].full_spec == api_app.specs(self.api)[1]:
-                    segments.append("x unset extraction model")
-                else:
-                    segments.append("x use for extraction")
-            segments += ["enter select", "tab providers", "esc quit"]
+            pinned = api_app.specs(self.api)[1]
+            on = self.filtered[self.cursor].full_spec if self.filtered else None
+            if self.view is ModelKind.COMPLETION:
+                if on is not None:
+                    # On the model pinned for extraction, the way back to
+                    # the story's model; on any other, the pin.
+                    if on == pinned.get(ModelRole.EXTRACTION):
+                        segments.append("x unset extraction model")
+                    else:
+                        segments.append("x use for extraction")
+                segments += ["d dictation models", "enter select"]
+            else:
+                segments.append("d models")
+                if on is not None:
+                    if on == pinned.get(ModelRole.DICTATION):
+                        segments.append("enter unset dictation model")
+                    else:
+                        segments.append("enter use for dictation")
+            segments += ["tab providers", "esc quit"]
             txt = " " + " · ".join(segments)
         return [("class:help", txt)]
 
@@ -168,6 +185,9 @@ class ModelPicker(ModelList, ProviderPanel):
             return
         if not self.filtered:
             return
+        if self.view is ModelKind.DICTATION:
+            self._toggle_pin(ModelRole.DICTATION)
+            return
         entry = self.filtered[self.cursor]
         if entry.loaded or not entry.can_manage:
             # Loaded — or a statically served engine (llama.cpp, a
@@ -200,8 +220,10 @@ class ModelPicker(ModelList, ProviderPanel):
             self._request_load()
         elif key == "u":
             self._request_unload()
-        elif key == "x":
-            self._toggle_extraction()
+        elif key == "x" and self.view is ModelKind.COMPLETION:
+            self._toggle_pin(ModelRole.EXTRACTION)
+        elif key == "d":
+            self._switch_view()
 
     def _build_application(self) -> Application[None]:
         kb = KeyBindings()

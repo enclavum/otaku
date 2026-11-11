@@ -14,9 +14,10 @@ per table:
     store.usage       token accounting
     store.history     the terminal's Up/Down input history
     store.settings    the settings stories share (the texts that may need sealing)
-    store.files       the files folder beside the database: a turn's and a card's pictures (`FileStore`)
+    store.files       the files folder beside the database: a turn's and a card's pictures, a card's raw file (`FileStore`)
 
-and the one operation that spans the tables and the folder: the sweep.
+and the operations that span the tables and the folder: the sweep, and
+the launch's cleanup of what deletes left behind.
 """
 
 from pathlib import Path
@@ -48,26 +49,42 @@ class Store:
         self._db = db
 
     @classmethod
-    def open(cls, db_path: Path, cipher: Cipher, *, backups_dir: Path, keep: int) -> Self:
+    def open(
+        cls, db_path: Path, cipher: Cipher, *, backups_dir: Path, keep: int | None = None
+    ) -> Self:
         """`Database.open`'s contract (creation, migration, the canary,
-        the daily backup), the files folder beside the database under
-        the same cipher, wrapped with the ops groups."""
+        the daily backup and the pruning, `keep` the snapshots kept), the
+        files folder beside the database under the same cipher, wrapped
+        with the ops groups."""
         db = Database.open(db_path, cipher, backups_dir=backups_dir, keep=keep)
         return cls(db, FileStore(db_path.parent / "files", cipher))
 
     @property
     def notes(self) -> list[Note]:
         """The nucleus's administrative facts (migration ran, backup
-        written or failed) — the caller logs every one and says the ones
-        carrying a `show` line; the store never does either."""
+        written or failed, files swept, file vacuumed) — the caller logs
+        every one and says the ones carrying a `show` line; the store
+        never does either."""
         return self._db.notes
 
     def close(self) -> None:
         self._db.close()
 
+    def cleanup(self) -> None:
+        """The launch's: what deletes left behind — the files no row
+        names (a crash between a delete's rows and its files), and the
+        database vacuumed once a quarter of it is free (`Database.vacuum`).
+        What it did joins `notes`."""
+        swept = self.sweep_files()
+        if swept:
+            self.notes.append(Note(f"files folder swept: {swept} unreferenced file(s) removed"))
+        vacuumed = self._db.vacuum()
+        if vacuumed is not None:
+            self.notes.append(vacuumed)
+
     def sweep_files(self) -> int:
         """Delete every file in the folder no message and no card names;
-        how many went. Run after a story or a card is deleted and once at
-        launch, so a crash between the rows and the files heals on the
-        next run."""
+        how many went. Run after a story or a card is deleted, and at
+        launch (`cleanup`), so a crash between the rows and the files
+        heals on the next run."""
         return self.files.sweep(self.messages.get_file_names() | self.cards.get_file_names())

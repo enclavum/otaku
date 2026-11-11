@@ -13,7 +13,7 @@ from otaku.backend.story.stories.services import NOTHING_TO_REVERT as NOTHING_TO
 from otaku.backend.story.stories.services import NOTHING_TO_UNDO as NOTHING_TO_UNDO
 from otaku.context.prompt import JoinType
 from otaku.formatting import LABEL_WIDTH, truncate_label
-from otaku.store.schema import CompletionType, Layout, StoryMode
+from otaku.store.story import CompletionType, Layout, StoryMode
 
 
 class StorySummary(Schema):

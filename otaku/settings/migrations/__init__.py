@@ -2,9 +2,9 @@
 
 This module holds the shape-change tables themselves and `migrate`, the
 whole launch step; `surgery` is the toolkit every edit is built from,
-`providers_file` the moves over providers.toml, `prompt_texts` the
-refreshed templates for prompts.toml, and `state_file` the thinking
-level's move out of state.toml. Everything here is idempotent and
+`providers_file` the moves over providers.toml, and `state_file` the
+moves over state.toml; prompts.toml's are the prompts package's own
+(`prompts.migrations`). Everything here is idempotent and
 convergent: it all simply reruns at every launch — no version stamp to
 trust, no one-shot step whose half-state could stick — so a crash
 between writes, a hand edit, or a launch that could not finish heals on
@@ -19,23 +19,12 @@ from otaku.settings.integrations import IntegrationConfig
 from otaku.settings.integrations import render as render_integrations
 from otaku.settings.migrations.config_file import hash_plain_password
 from otaku.settings.migrations.integrations_file import ensure_integrations
-from otaku.settings.migrations.prompt_texts import (
-    CARD_FRAMING_0_7_0,
-    EXTRACT_0_2_2,
-    EXTRACT_0_3_0,
-    EXTRACT_0_5_0,
-    HISTORY_0_3_0,
-    STORY_SO_FAR_0_3_0,
-    refresh_template,
-    rename_template,
-    update_prompts,
-)
 from otaku.settings.migrations.providers_file import (
     ensure_providers,
     move_providers,
     seal_api_keys,
 )
-from otaku.settings.migrations.state_file import move_think
+from otaku.settings.migrations.state_file import move_model_pins, move_think
 from otaku.settings.migrations.surgery import (
     Migration,
     apply_migrations,
@@ -48,12 +37,6 @@ from otaku.settings.migrations.surgery import (
     update_config,
     update_providers,
     update_settings_file,
-)
-from otaku.settings.prompts import (
-    CARD_FRAMING_DEFAULT,
-    EXTRACT_DEFAULT,
-    JOURNAL_HISTORY_DEFAULT,
-    SCENE_HISTORY_DEFAULT,
 )
 from otaku.settings.providers import ProviderConfig
 
@@ -205,43 +188,13 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         ),
         after="show_banner",
     ),
-]
-
-
-# prompts.toml's shape-change table: the stub materializes every template,
-# so a changed built-in must be carried to existing files — and only into
-# files still holding the superseded shipped text, byte-exact (an edited
-# template never matches and is never touched).
-_PROMPT_MIGRATIONS: list[Migration] = [
-    # 0.3.0 — journals become the record of presence: one per character
-    # present, silent bystanders included, arrivals and departures named.
-    refresh_template("extract_prompt", EXTRACT_0_2_2, EXTRACT_DEFAULT),
-    # 0.4.0 — the two rollups say WHOSE history each is: the story-so-far
-    # over scene summaries, and a character's own over their journal.
-    # Values ride along untouched, edited or shipped.
-    rename_template("story_so_far_prompt", "scene_history_prompt"),
-    rename_template("history_prompt", "journal_history_prompt"),
-    # 0.4.0 — the journal rollup keeps the entries' first-person voice; a
-    # file still holding the shipped third-person text follows. AFTER the
-    # rename, so one launch heals a file however far it got.
-    refresh_template("journal_history_prompt", HISTORY_0_3_0, JOURNAL_HISTORY_DEFAULT),
-    # 0.4.0 — the language rule stops spelling "do not answer in English":
-    # run without thinking (as extraction is), a model can read that
-    # negation as the command and answer an English story in another
-    # tongue. Every lore template now states the rule positively. The
-    # journal template's ride arrives with the refresh above; these carry
-    # the other two, whose 0.2.2 and 0.3.0 texts are identical.
-    refresh_template("extract_prompt", EXTRACT_0_3_0, EXTRACT_DEFAULT),
-    refresh_template("scene_history_prompt", STORY_SO_FAR_0_3_0, SCENE_HISTORY_DEFAULT),
-    # 0.6.0 — a scene's pictures reach the pass, marked in the text and
-    # attached where the model can see: the template asks for what
-    # matters in them, since a summarized row loses its picture.
-    refresh_template("extract_prompt", EXTRACT_0_5_0, EXTRACT_DEFAULT),
-    # 0.8.0 — a card's reminder (its depth note) rides on its own, a few of
-    # the reader's messages from the end, so its line leaves the block; and
-    # the block's close, which rode on that line and went with it whenever
-    # a card had none, stands on its own.
-    refresh_template("card_framing", CARD_FRAMING_0_7_0, CARD_FRAMING_DEFAULT),
+    # 0.10.0 — the logs are pruned by age, a week unless set.
+    ensure_section(
+        "logs",
+        "[logs]\n"
+        + row("days = 7", "days of logs kept in logs/ (0 disables logging except for error logs)"),
+        after="database",
+    ),
 ]
 
 
@@ -291,8 +244,8 @@ def migrate(
     provider move, the given providers' sections ensured, the providers
     table (plain api keys sealed; an unsealable line stays for the next
     launch — and a section founded just above gaining what the table
-    adds, in the same launch), the prompt-template refreshes, and the
-    thinking level an older state.toml still holds moved to its model.
+    adds, in the same launch), and the models and the thinking level an
+    older state.toml still holds moved where they now live.
     providers.toml itself converges too: missing beside an existing
     config — a crash between the first-run writes, a hand deletion — it
     is founded empty here, for the ensured sections to fill. A missing
@@ -325,5 +278,7 @@ def migrate(
     update_settings_file(
         files.integrations, files.backups_dir, [seal_api_keys(secrets.seal, secrets.is_sealed)]
     )
-    update_prompts(files.prompts, files.backups_dir, _PROMPT_MIGRATIONS)
+    # Each rewrites state.toml whole and carries the other's keys along
+    # (`state_file`), so the order is free.
+    move_model_pins(files.state)
     move_think(files.state, files.models)

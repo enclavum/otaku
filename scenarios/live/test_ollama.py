@@ -6,6 +6,10 @@ to be running with its model available; the spec comes from
 OTAKU_TEST_MODEL, default ollama/gemma3. A small model's output is not
 deterministic, so these assert that otaku behaves — streams, persists,
 survives an extraction attempt — not that the model answers well.
+The dictation smoke writes down a sentence spoken by this machine's
+voice with OTAKU_LIVE_OLLAMA_DICTATION_MODEL, default the first model it
+files for dictation (one that takes audio: gemma4:e4b); it skips where
+no dictation model is offered.
 """
 
 import os
@@ -15,10 +19,12 @@ import httpx
 import pytest
 
 from otaku.settings.providers import ProviderConfig
+from scenarios.support.live import assert_written_down, dictation_model, spoken_wav
 from scenarios.support.live import live_app as build_app
 
 SPEC = os.environ.get("OTAKU_TEST_MODEL", "ollama/gemma3")
 URL = "http://127.0.0.1:11434/v1"
+DICTATION_MODEL = os.environ.get("OTAKU_LIVE_OLLAMA_DICTATION_MODEL", "")
 
 pytestmark = pytest.mark.live
 
@@ -42,6 +48,10 @@ class TestOllama:
             assert live_app.store.scenes.get_current(story_id, ids)
         else:  # it did not — the tail stays open, the app stays up
             assert "failed" in out or "Nothing new" in out
+
+    def test_a_recording_is_written_down(self, live_app, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+        model = dictation_model(live_app, "ollama", DICTATION_MODEL)
+        assert_written_down(live_app, "ollama", model, spoken_wav(tmp_path))
 
 
 @pytest.fixture

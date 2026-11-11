@@ -54,7 +54,7 @@ _STATIC = _SRC / "web" / "static"
 _ALLOWED = {
     # `python -m otaku`: the module entry, which only calls the real one.
     "__main__": {"cli"},
-    "cli": {"terminal", "web", "backend.launch", "logging", "update", "formatting"},
+    "cli": {"terminal", "web", "backend.launch", "logging", "update", "envvars", "formatting"},
     # `web` because `/set serve` serves this app to a browser beside the
     # chat: the arrow only points this way, so `web` knows nothing of
     # `terminal`.
@@ -62,8 +62,10 @@ _ALLOWED = {
     "web": {"console", "backend.api", "formatting"},
     # What a frontend draws in the terminal it was LAUNCHED from — a leaf,
     # handed what it draws.
-    "console": {"formatting"},
+    "console": {"envvars", "formatting"},
     "agents": {"context", "providers", "store", "logging", "formatting"},
+    # `update` for the checkout otaku runs from, which the home folder's
+    # default goes by (`backend.app.paths`)
     "backend": {
         "agents",
         "context",
@@ -71,19 +73,29 @@ _ALLOWED = {
         "integrations",
         "store",
         "settings",
+        "prompts",
         "encryption",
         "logging",
+        "update",
+        "envvars",
         "formatting",
     },
     "context": {"store", "providers"},
     # `formatting` for `Money`: a value type, in the leaf everyone may reach.
-    "providers": {"settings", "formatting"},
+    "providers": {"settings", "envvars", "formatting"},
     "integrations": {"settings", "formatting"},
-    "store": {"encryption"},
+    # `formatting` for the size a vacuum freed, in the sentence it returns.
+    "store": {"encryption", "formatting"},
+    # The templates, built-in and as prompts.toml overrides them; the
+    # settings package for its committed writes and its surgery.
+    "prompts": {"settings", "formatting"},
     "settings": {"formatting"},
     "logging": {"providers", "encryption", "formatting"},
     "encryption": {"formatting"},
     "update": set(),
+    # The names of the environment variables otaku reads: a leaf, like
+    # `formatting`, for every layer that reads one.
+    "envvars": set(),
     "formatting": set(),
 }
 
@@ -210,6 +222,8 @@ class TestTerminal:
 # folders and, beside them, the machinery they share — a module, its place
 # its mark.
 _TWINS = ("app", "codex", "story")
+# The layer each group's machinery is, the domain's alone to import.
+_GROUP_LAYERS = {f"{PACKAGE}.backend.{twin}" for twin in _TWINS}
 _RESOURCE_FILES = {"__init__.py", "resources.py", "schemas.py", "services.py"}
 # The app's own resources: `core` in the three places, `app` in the
 # terminal's flat ones.
@@ -341,7 +355,8 @@ class TestMachinery:
         # the layer above never does, but for the launch, which composes
         # the app out of the domain's parts. The backend's machinery, a
         # module beside a group's folders, is the domain's: its services and
-        # its machinery import it, the interface never does
+        # its machinery import it, the interface never does. A protected
+        # module of `formats`, which has no folders, is its own package's
         violations = []
         for path in _python_files():
             importer = _module_of(path)
@@ -349,7 +364,7 @@ class TestMachinery:
                 layer = _layer_of(found.target)
                 if layer is None:
                     continue
-                if layer.startswith(f"{PACKAGE}.backend."):
+                if layer in _GROUP_LAYERS:
                     if _is_domain(importer) or importer == f"{PACKAGE}.backend.launch":
                         continue
                 elif importer == layer or importer.startswith(f"{layer}."):
@@ -528,7 +543,18 @@ class TestInterface:
         marked = {
             f"{owner}.{verb.name}" for owner, verb, marks in _verbs() if "any_thread" in marks
         }
-        assert marked == {"StatusResource.get", "ProvidersResource.list", "ExtractionResource.get"}
+        assert marked == {
+            "StatusResource.get",
+            "ProvidersResource.list",
+            "ExtractionResource.get",
+            "DictationResource.create",
+            "CardGenerationResource.create",
+            "CardGenerationResource.delete",
+            "CardsResource.create",
+            "CardFetchesResource.create",
+            "StoryCardsResource.create",
+            "StoryCardFetchesResource.create",
+        }
 
     def test_every_route_follows_its_call_path(self) -> None:
         # `api.stories.messages.create(5, …)` is POST /api/stories/5/messages:
@@ -766,7 +792,11 @@ _PAGE = {
     # to say can reach it without reaching for a screen.
     "status": {"dom"},
     "prose": {"dom"},
+    # A card's text read as Markdown, its inline marks a reply's.
+    "markdown": {"dom", "prose"},
     "browser": {"dom", "status"},
+    # The microphone, opened and read: a recording and its level.
+    "microphone": set(),
     # A turn's pictures: the tiles and the lightbox, drawn by the
     # transcript and by the dossier's reader alike, so below both.
     "pictures": {"api", "dom"},
@@ -811,10 +841,21 @@ _PAGE = {
         "shell",
         "tools",
         "transcript",
+        "transfer",
     },
     # All characters, and the card picker every "which card" goes through;
     # `transfer` for the card dialog an invite and an import open.
-    "characters": {"api", "browser", "dom", "format", "held", "pictures", "shell", "transfer"},
+    "characters": {
+        "api",
+        "browser",
+        "dom",
+        "format",
+        "held",
+        "markdown",
+        "pictures",
+        "shell",
+        "transfer",
+    },
     # The dossier's fifth tab in a module of its own. `models` for the
     # mask a set key reads behind, as a provider's does.
     "tools": {"api", "browser", "dom", "models", "shell"},
@@ -849,11 +890,14 @@ _PAGE = {
         "transfer",
     },
     "composer": {"api", "commands", "dom", "held", "language", "status", "transcript"},
+    # What is said, written down into the composer.
+    "dictation": {"api", "browser", "composer", "dom", "microphone", "status"},
     "app": {
         "api",
         "browser",
         "commands",
         "composer",
+        "dictation",
         "dom",
         "held",
         "language",

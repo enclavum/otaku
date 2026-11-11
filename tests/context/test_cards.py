@@ -1,8 +1,9 @@
 """Cards as context material: a character's profile written as TOML and
 read back (`CharacterProfile.to_toml`, `from_toml`) — any card text,
 field for field — the wire block composed from a story character's
-profile (`card_to_wire`), bound at wire time (`bind`, the vocabulary
-`binds` answers for), and what a card injects beside it
+profile (`card_to_wire`) — or, where none of its fields came up, the
+template of a card with none — bound at wire time (`bind`), and what a card
+injects beside it
 (`card_injections`) — each reading a profile an older version wrote
 (`read_toml`)."""
 
@@ -13,12 +14,14 @@ import pytest
 from otaku.context.cards import (
     CharacterProfile,
     bind,
-    binds,
     card_injections,
     card_to_wire,
     read_toml,
 )
-from otaku.store.schema import InjectionPosition
+from otaku.store.story import InjectionPosition
+
+# The block of a card none of whose fields came up.
+EMPTY = "((OOC: {name} alone.))"
 
 
 class TestCardToWire:
@@ -35,7 +38,7 @@ class TestCardToWire:
         profile = CharacterProfile(
             name="Elara", user="Alex", description="{{char}} guards {{user}}", personality="stern"
         )
-        got = card_to_wire(profile.to_toml(), self.TEMPLATE, char="Elara")
+        got = card_to_wire(profile.to_toml(), self.TEMPLATE, EMPTY, char="Elara")
         assert "You are joined by Elara." in got
         assert "Description: Elara guards Alex" in got
         assert "Personality: stern" in got
@@ -44,13 +47,13 @@ class TestCardToWire:
         # A copy written before 0.8.0 carries a `name` line; the
         # character's own name is the one that binds.
         old = "name = 'Elara'\n\nuser = 'Alex'\n\ndescription = '{{char}} waits for {{user}}'"
-        got = card_to_wire(old, self.TEMPLATE, char="Mara")
+        got = card_to_wire(old, self.TEMPLATE, EMPTY, char="Mara")
         assert "You are joined by Mara." in got
         assert "Description: Mara waits for Alex" in got
 
     def test_a_line_of_empty_placeholders_is_dropped(self) -> None:
         profile = CharacterProfile(name="Elara", user="A", description="warden")
-        got = card_to_wire(profile.to_toml(), self.TEMPLATE, char="Elara")
+        got = card_to_wire(profile.to_toml(), self.TEMPLATE, EMPTY, char="Elara")
         assert "Scenario:" not in got
         assert "How they speak:" not in got  # no examples — the label goes with them
         assert got.endswith("\n))")  # the close keeps its own line
@@ -59,37 +62,54 @@ class TestCardToWire:
         # The reminder rides on its own now; a template edited before
         # keeps its line, which reads empty and drops.
         profile = CharacterProfile(name="Elara", description="warden", reminder="always hits")
-        got = card_to_wire(profile.to_toml(), "D: {description}\nNote: {depth_note}", char="Elara")
+        got = card_to_wire(
+            profile.to_toml(), "D: {description}\nNote: {depth_note}", EMPTY, char="Elara"
+        )
         assert got == "D: warden"
 
     def test_the_examples_join_as_blocks(self) -> None:
         profile = CharacterProfile(name="E", examples=("a: hi", "b: yo"))
-        got = card_to_wire(profile.to_toml(), "X:\n{examples}", char="E")
+        got = card_to_wire(profile.to_toml(), "X:\n{examples}", EMPTY, char="E")
         assert "a: hi\n\nb: yo" in got
 
     def test_braces_inside_card_text_are_never_placeholders(self) -> None:
         # One pass over the TEMPLATE only: values are not re-scanned.
         profile = CharacterProfile(name="E", description="use {personality} literally")
-        got = card_to_wire(profile.to_toml(), "D: {description}\nP: {personality}", char="E")
+        got = card_to_wire(profile.to_toml(), "D: {description}\nP: {personality}", EMPTY, char="E")
         assert "D: use {personality} literally" in got
         assert "\nP:" not in got  # personality itself is empty -> line dropped
 
     def test_an_unknown_placeholder_is_left_as_written(self) -> None:
-        got = card_to_wire(CharacterProfile(name="E").to_toml(), "hello {nonsense}", char="E")
+        got = card_to_wire(
+            CharacterProfile(name="E").to_toml(), "hello {nonsense}", EMPTY, char="E"
+        )
         assert got == "hello {nonsense}"
 
     def test_a_key_outside_the_vocabulary_fills_nothing(self) -> None:
         # what the profile does not read (`from_toml`), the wire does not send
-        assert card_to_wire("model = 'x'", "M: {model}", char="E") == "M: {model}"
+        assert card_to_wire("model = 'x'", "M: {model}", EMPTY, char="E") == "M: {model}"
 
     def test_the_user_fills_from_the_profile(self) -> None:
-        assert card_to_wire("user = 'Alex'", "P: {user}", char="E") == "P: Alex"
+        assert card_to_wire("user = 'Alex'", "P: {user}", EMPTY, char="E") == "P: Alex"
         text = CharacterProfile(name="E", description="d").to_toml()
-        assert card_to_wire(text, "P: {user}\nD: {description}", char="E") == "D: d"
+        assert card_to_wire(text, "P: {user}\nD: {description}", EMPTY, char="E") == "D: d"
+
+    def test_a_card_none_of_whose_fields_came_up_sends_the_empty_template(self) -> None:
+        bare = CharacterProfile(name="Elara", user="Alex").to_toml()
+        assert card_to_wire(bare, self.TEMPLATE, EMPTY, char="Elara") == "((OOC: Elara alone.))"
+
+    def test_a_field_the_template_does_not_name_is_none_of_the_blocks(self) -> None:
+        greeted = CharacterProfile(name="Elara", greeting="Hello.").to_toml()
+        assert card_to_wire(greeted, self.TEMPLATE, EMPTY, char="Elara") == "((OOC: Elara alone.))"
+
+    def test_a_template_naming_no_field_is_sent_as_written(self) -> None:
+        bare = CharacterProfile(name="Elara").to_toml()
+        got = card_to_wire(bare, "((OOC: {name} is here.))", EMPTY, char="Elara")
+        assert got == "((OOC: Elara is here.))"
 
     def test_a_line_with_one_placeholder_filled_stays(self) -> None:
         text = CharacterProfile(name="E", description="warden").to_toml()
-        assert card_to_wire(text, "{description} / {scenario}", char="E") == "warden / "
+        assert card_to_wire(text, "{description} / {scenario}", EMPTY, char="E") == "warden / "
 
 
 class TestBind:
@@ -112,25 +132,6 @@ class TestBind:
     def test_a_backslash_in_a_name_survives(self) -> None:
         assert bind("{{char}}!", char=r"El\ara", user="U") == r"El\ara!"
         assert bind("{{user}}!", char="E", user=r"Al\1ex") == r"Al\1ex!"
-
-
-class TestBinds:
-    """Whether `bind` resolves an exact token: the vocabulary question."""
-
-    KNOWN = ("{{char}}", "{{ USER }}", "<BOT>", "<user>", "{{original}}")
-    UNKNOWN = ("{{roll:d20}}", "{{random}}")
-
-    def test_the_vocabulary_binds(self) -> None:
-        for macro in self.KNOWN:
-            assert binds(macro), macro
-
-    def test_anything_else_or_inexact_does_not(self) -> None:
-        for macro in (*self.UNKNOWN, "{{char}} x", "{{char}}{{user}}"):
-            assert not binds(macro), macro
-
-    def test_it_answers_what_bind_does_to_the_token(self) -> None:
-        for macro in (*self.KNOWN, *self.UNKNOWN):
-            assert binds(macro) == (bind(macro, char="C", user="U") != macro), macro
 
 
 class TestProfileToml:
@@ -250,7 +251,7 @@ class TestProfileToml:
         # pair, which TOML refuses
         old = 'examples = ["Hi \\ud83c\\udfad"]\n\nsystem_prompt = "Be \\ud83c\\udfad."'
         assert CharacterProfile.from_toml(old, name="E").examples == ("Hi 🎭",)
-        assert card_to_wire(old, "X: {examples}", char="E") == "X: Hi 🎭"
+        assert card_to_wire(old, "X: {examples}", EMPTY, char="E") == "X: Hi 🎭"
         system, _ = card_injections(old, char="E")
         assert system.text == "Be 🎭."
 
